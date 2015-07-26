@@ -31,5 +31,5 @@ def classFactory(iface):  # pylint: disable=invalid-name
     :type iface: QgsInterface
     """
     #
-    from .tdg import TDGAlgorithmProviderPlugin
-    return TDGAlgorithmProviderPlugin(iface)
+    from .TDGAlgorithmProviderPlugin import TDGAlgorithmProviderPlugin
+    return TDGAlgorithmProviderPlugin()

@@ -38,21 +38,15 @@ LOCALES =
 # translation
 SOURCES = \
 	__init__.py \
-	tdg.py \
-	tdg_dialog.py
+	TDGAlgorithmProviderPlugin.py \
 
 PLUGINNAME = TDGAlgorithmProviderPlugin
 
 PY_FILES = \
-	tdg.py \
-	tdg_dialog.py \
+	TDGAlgorithmProviderPlugin.py \
 	__init__.py
 
-UI_FILES = tdg_dialog_base.ui
-
 EXTRAS = icon.png metadata.txt
-
-COMPILED_RESOURCE_FILES = resources_rc.py
 
 PEP8EXCLUDE=pydev,resources_rc.py,conf.py,third_party,ui
 

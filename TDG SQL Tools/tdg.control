@@ -1,0 +1,7 @@
+directory = 'extension'
+default_version = '0.1'
+comment = 'SQL tools for TDG analyses'
+requires = 'postgis'
+superuser = false
+relocatable = false
+schema = 'tdg'

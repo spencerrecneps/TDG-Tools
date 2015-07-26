@@ -1,5 +1,0 @@
-<RCC>
-    <qresource prefix="/plugins/TDGAlgorithmProviderPlugin" >
-        <file>icon.png</file>
-    </qresource>
-</RCC>
