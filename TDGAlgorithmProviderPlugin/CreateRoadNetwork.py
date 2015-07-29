@@ -26,14 +26,15 @@ __copyright__ = '(C) 2015, Spencer Gardner'
 __revision__ = '$Format:%H$'
 
 from PyQt4.QtCore import QSettings
-from qgis.core import QgsDataSourceURI, QgsVectorLayerImport, QGis, QgsFeature, QgsGeometry
+from qgis.core import QgsDataSourceURI, QgsVectorLayerImport, QGis, QgsFeature
+from qgis.core import QgsGeometry, QgsCoordinateReferenceSystem, QgsCoordinateTransform
 
 import processing
 from processing.core.GeoAlgorithm import GeoAlgorithm
 from processing.core.GeoAlgorithmExecutionException import GeoAlgorithmExecutionException
 from processing.core.parameters import ParameterVector
 from processing.core.parameters import ParameterString
-from processing.core.parameters import ParameterTableField
+from processing.core.parameters import ParameterCrs
 from processing.core.parameters import ParameterBoolean
 from processing.core.parameters import ParameterSelection
 
@@ -55,6 +56,7 @@ class CreateRoadNetwork(GeoAlgorithm):
     DATABASE = 'DATABASE'
     TABLENAME = 'TABLENAME'
     OVERWRITE = 'OVERWRITE'
+    TARGET_CRS = 'TARGET_CRS'
 
     def dbConnectionNames(self):
         settings = QSettings()
@@ -90,6 +92,10 @@ class CreateRoadNetwork(GeoAlgorithm):
         # 4 - Overwrite existing table?
         self.addParameter(ParameterBoolean(self.OVERWRITE,
             self.tr('Overwrite'), True))
+
+        # 5 - CRS
+        self.addParameter(ParameterCrs(self.TARGET_CRS,
+            self.tr('Target CRS'), 'EPSG:4326'))
 
     def processAlgorithm(self, progress):
         # Retrieve the values of the parameters entered by the user
@@ -128,6 +134,11 @@ class CreateRoadNetwork(GeoAlgorithm):
         # 4 - Overwrite
         overwrite = self.getParameterValue(self.OVERWRITE)
 
+        # 5 - Target CRS
+        crsId = self.getParameterValue(self.TARGET_CRS)
+        targetCrs = QgsCoordinateReferenceSystem()
+        targetCrs.createFromUserInput(crsId)
+
         ##########################
         # And now we can process #
         ##########################
@@ -151,9 +162,13 @@ class CreateRoadNetwork(GeoAlgorithm):
             providerName,
             fields,
             geomType,
-            self.crs,
+            targetCrs,
             overwrite
         )
+
+        # prepare the reprojection
+        layerCrs = roadsLayer.crs()
+        crsTransform = QgsCoordinateTransform(layerCrs, targetCrs)
 
         # iterate features and copy over
         outFeat = QgsFeature()
@@ -166,6 +181,7 @@ class CreateRoadNetwork(GeoAlgorithm):
             outFeat.setAttributes(attrs)
 
             for g in geometries:
+                g.transform(crsTransform)
                 outFeat.setGeometry(g)
                 newTable.addFeature(outFeat)
 
