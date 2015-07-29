@@ -26,7 +26,9 @@ __copyright__ = '(C) 2015, Spencer Gardner'
 __revision__ = '$Format:%H$'
 
 from PyQt4.QtCore import QSettings
+from qgis.core import QgsDataSourceURI, QgsVectorLayerImport, QGis, QgsFeature, QgsGeometry
 
+import processing
 from processing.core.GeoAlgorithm import GeoAlgorithm
 from processing.core.GeoAlgorithmExecutionException import GeoAlgorithmExecutionException
 from processing.core.parameters import ParameterVector
@@ -35,7 +37,7 @@ from processing.core.parameters import ParameterTableField
 from processing.core.parameters import ParameterBoolean
 from processing.core.parameters import ParameterSelection
 
-from processing.tools import dataobjects
+from processing.tools import dataobjects, vector
 from processing.algs.qgis import postgis_utils
 
 
@@ -69,7 +71,7 @@ class CreateRoadNetwork(GeoAlgorithm):
 
         # The branch of the toolbox under which the algorithm will appear
         #self.group = 'Algorithms for vector layers'
-        self.group = 'TDG Tools'
+        self.group = 'Network Analysis'
 
         # 1 - Input roads layer. Must be line type
         # It is a mandatory (not optional) one, hence the False argument
@@ -92,7 +94,7 @@ class CreateRoadNetwork(GeoAlgorithm):
     def processAlgorithm(self, progress):
         # Retrieve the values of the parameters entered by the user
         # 1 - roads layer
-        roadsLayer = dataobjects.getObjectFromUri(self.ROADS_LAYER)
+        roadsLayer = dataobjects.getObjectFromUri(self.getParameterValue(self.ROADS_LAYER))
 
         # 2 - db connection
         connection = self.DB_CONNECTIONS[self.getParameterValue(self.DATABASE)]
@@ -110,7 +112,7 @@ class CreateRoadNetwork(GeoAlgorithm):
 
         # 3 - table name
         table = self.getParameterValue(self.TABLENAME).strip().lower()
-        if table == '':
+        if table is None or len(table) < 1:
             table = roadsLayer.name().lower()
         table.replace(' ', '')
 
@@ -123,18 +125,61 @@ class CreateRoadNetwork(GeoAlgorithm):
             raise GeoAlgorithmExecutionException(
                 self.tr("Couldn't connect to database:\n%s" % e.message))
 
-        # And now we can process
+        # 4 - Overwrite
+        overwrite = self.getParameterValue(self.OVERWRITE)
 
-        # Now we take the features from input layer and add them to the
-        # output. Method features() returns an iterator, considering the
-        # selection that might exist in layer and the configuration that
-        # indicates should algorithm use only selected features or all
-        # of them
-        features = vector.features(roadsLayer)
-        for f in features:
-            pass
+        ##########################
+        # And now we can process #
+        ##########################
+        #linestrings = processing.runalg('qgis:multiparttosingleparts')
 
-        # There is nothing more to do here. We do not have to open the
-        # layer that we have created. The framework will take care of
-        # that, or will handle it if this algorithm is executed within
-        # a complex model
+        # first create the tdg database extension if it doesn't exist
+        processing.runalg("qgis:postgisexecutesql",database,
+            "CREATE EXTENSION IF NOT EXISTS tdg")
+
+        # set up connection to the db
+        uri = QgsDataSourceURI()
+        uri.setConnection(host, str(port), database, username, password)
+        uri.setDataSource('tdg', table, 'geom', 'id')
+
+        # set up inputs for the new table to be created
+        fields = roadsLayer.dataProvider().fields()
+        geomType = QGis.WKBLineString
+
+        newTable = QgsVectorLayerImport(
+            uri.uri(),
+            providerName,
+            fields,
+            geomType,
+            self.crs,
+            overwrite
+        )
+
+        # iterate features and copy over
+        outFeat = QgsFeature()
+        inGeom = QgsGeometry()
+        for feature in vector.features(roadsLayer):
+            inGeom = feature.geometry()
+            attrs = feature.attributes()
+
+            geometries = self.extractAsSingle(inGeom)
+            outFeat.setAttributes(attrs)
+
+            for g in geometries:
+                outFeat.setGeometry(g)
+                newTable.addFeature(outFeat)
+
+        del newTable
+        db.create_spatial_index(table, 'tdg', 'geom')
+        db.vacuum_analyze(table, 'tdg')
+
+    def extractAsSingle(self, geom):
+        multiGeom = QgsGeometry()
+        geometries = []
+        if geom.isMultipart():
+            multiGeom = geom.asMultiPolyline()
+            for i in multiGeom:
+                geometries.append(QgsGeometry().fromPolyline(i))
+        else:
+            geometries.append(geom)
+        return geometries
