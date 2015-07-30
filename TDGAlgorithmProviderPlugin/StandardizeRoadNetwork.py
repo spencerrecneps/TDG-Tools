@@ -2,7 +2,7 @@
 
 """
 ***************************************************************************
-    __init__.py
+    StandardizeRoadNetwork.py
     ---------------------
     Date                 : July 2015
     Copyright            : (C) 2015 by Spencer Gardner
@@ -39,9 +39,10 @@ from processing.core.parameters import ParameterSelection
 
 from processing.tools import dataobjects, vector
 from processing.algs.qgis import postgis_utils
+from dbutils import LayerDbInfo
 
 
-class CreateRoadNetwork(GeoAlgorithm):
+class StandardizeRoadNetwork(GeoAlgorithm):
     """This algorithm takes an input road dataset and converts
     it into a standardized format for use in stress analysis
     and other tasks.
@@ -52,14 +53,11 @@ class CreateRoadNetwork(GeoAlgorithm):
     # calling from the QGIS console.
 
     ROADS_LAYER = 'ROADS_LAYER'
-    DATABASE = 'DATABASE'
-    TABLENAME = 'TABLENAME'
+    ID_FIELD = 'ID_FIELD'
+    NAME_FIELD = 'NAME_FIELD'
+    ADT_FIELD = 'ADT_FIELD'
+    SPEED_FIELD = 'SPEED_FIELD'
     OVERWRITE = 'OVERWRITE'
-
-    def dbConnectionNames(self):
-        settings = QSettings()
-        settings.beginGroup('/PostgreSQL/connections/')
-        return settings.childGroups()
 
     def defineCharacteristics(self):
         """Here we define the inputs and output of the algorithm, along
@@ -67,7 +65,7 @@ class CreateRoadNetwork(GeoAlgorithm):
         """
 
         # The name that the user will see in the toolbox
-        self.name = 'Import new TDG road layer'
+        self.name = 'Create standardized TDG road layer'
 
         # The branch of the toolbox under which the algorithm will appear
         #self.group = 'Algorithms for vector layers'
@@ -76,110 +74,35 @@ class CreateRoadNetwork(GeoAlgorithm):
         # 1 - Input roads layer. Must be line type
         # It is a mandatory (not optional) one, hence the False argument
         self.addParameter(ParameterVector(self.ROADS_LAYER,
-            self.tr('Roads layer'), [ParameterVector.VECTOR_TYPE_LINE], False))
+            self.tr('Roads layer'), [ParameterVector.VECTOR_TYPE_LINE], optional=False))
 
-        # 2 - DB connection
-        self.DB_CONNECTIONS = self.dbConnectionNames()
-        self.addParameter(ParameterSelection(self.DATABASE,
-            self.tr('Database (connection name)'), self.DB_CONNECTIONS))
+        # 2 - Source ID field in the roads data
+        # Optional field
+        self.addParameter(ParameterTableField(self.ID_FIELD,
+            self.tr('Original ID field of the road layer'), optional=True))
 
-        # 3 - Table name
-        self.addParameter(ParameterString(self.TABLENAME,
-            self.tr('Table name to import to (leave blank to use layer name)')))
+        # 3 - Name field in the roads data
+        # Optional field
+        self.addParameter(ParameterTableField(self.NAME_FIELD,
+            self.tr('Name field of the road layer'), optional=True))
 
-        # 4 - Overwrite existing table?
+        # 4 - ADT field in the roads data
+        # Optional field
+        self.addParameter(ParameterTableField(self.ADT_FIELD,
+            self.tr('ADT field of the road layer'), optional=True))
+
+        # 5 - Speed limit field in the roads data
+        # Optional field
+        self.addParameter(ParameterTableField(self.SPEED_FIELD,
+            self.tr('Speed limit field of the road layer'), optional=True))
+
+        # 6 - Overwrite existing table?
         self.addParameter(ParameterBoolean(self.OVERWRITE,
-            self.tr('Overwrite'), True))
+            self.tr('Overwrite'), default=True))
 
     def processAlgorithm(self, progress):
         # Retrieve the values of the parameters entered by the user
         # 1 - roads layer
         roadsLayer = dataobjects.getObjectFromUri(self.getParameterValue(self.ROADS_LAYER))
 
-        # 2 - db connection
-        connection = self.DB_CONNECTIONS[self.getParameterValue(self.DATABASE)]
-        settings = QSettings()
-        mySettings = '/PostgreSQL/connections/' + connection
-        try:
-            database = settings.value(mySettings + '/database')
-            username = settings.value(mySettings + '/username')
-            host = settings.value(mySettings + '/host')
-            port = settings.value(mySettings + '/port', type=int)
-            password = settings.value(mySettings + '/password')
-        except Exception, e:
-            raise GeoAlgorithmExecutionException(
-                self.tr('Bad database connection name: %s' % connection))
-
-        # 3 - table name
-        table = self.getParameterValue(self.TABLENAME).strip().lower()
-        if table is None or len(table) < 1:
-            table = roadsLayer.name().lower()
-        table.replace(' ', '')
-
-        # test connection
-        providerName = 'postgres'
-        try:
-            db = postgis_utils.GeoDB(host=host, port=port, dbname=database,
-                                     user=username, passwd=password)
-        except postgis_utils.DbError, e:
-            raise GeoAlgorithmExecutionException(
-                self.tr("Couldn't connect to database:\n%s" % e.message))
-
-        # 4 - Overwrite
-        overwrite = self.getParameterValue(self.OVERWRITE)
-
-        ##########################
-        # And now we can process #
-        ##########################
-        #linestrings = processing.runalg('qgis:multiparttosingleparts')
-
-        # first create the tdg database extension if it doesn't exist
-        processing.runalg("qgis:postgisexecutesql",database,
-            "CREATE EXTENSION IF NOT EXISTS tdg")
-
-        # set up connection to the db
-        uri = QgsDataSourceURI()
-        uri.setConnection(host, str(port), database, username, password)
-        uri.setDataSource('tdg', table, 'geom', 'id')
-
-        # set up inputs for the new table to be created
-        fields = roadsLayer.dataProvider().fields()
-        geomType = QGis.WKBLineString
-
-        newTable = QgsVectorLayerImport(
-            uri.uri(),
-            providerName,
-            fields,
-            geomType,
-            self.crs,
-            overwrite
-        )
-
-        # iterate features and copy over
-        outFeat = QgsFeature()
-        inGeom = QgsGeometry()
-        for feature in vector.features(roadsLayer):
-            inGeom = feature.geometry()
-            attrs = feature.attributes()
-
-            geometries = self.extractAsSingle(inGeom)
-            outFeat.setAttributes(attrs)
-
-            for g in geometries:
-                outFeat.setGeometry(g)
-                newTable.addFeature(outFeat)
-
-        del newTable
-        db.create_spatial_index(table, 'tdg', 'geom')
-        db.vacuum_analyze(table, 'tdg')
-
-    def extractAsSingle(self, geom):
-        multiGeom = QgsGeometry()
-        geometries = []
-        if geom.isMultipart():
-            multiGeom = geom.asMultiPolyline()
-            for i in multiGeom:
-                geometries.append(QgsGeometry().fromPolyline(i))
-        else:
-            geometries.append(geom)
-        return geometries
+        roadsDb = LayerDbInfo(roadsLayer.source())

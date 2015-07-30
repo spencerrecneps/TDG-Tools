@@ -31,6 +31,7 @@ from processing.core.ProcessingConfig import Setting, ProcessingConfig
 from processing.script.ScriptUtils import ScriptUtils
 
 from CreateRoadNetwork import CreateRoadNetwork
+from StandardizeRoadNetwork import StandardizeRoadNetwork
 
 
 class TDGAlgorithmProvider(AlgorithmProvider):
@@ -42,7 +43,7 @@ class TDGAlgorithmProvider(AlgorithmProvider):
         self.activate = True
 
         # Load algorithms
-        self.alglist = [CreateRoadNetwork()]
+        self.alglist = [CreateRoadNetwork(),StandardizeRoadNetwork()]
         for alg in self.alglist:
             alg.provider = self
 
