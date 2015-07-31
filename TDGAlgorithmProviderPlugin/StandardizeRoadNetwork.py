@@ -52,6 +52,7 @@ class StandardizeRoadNetwork(GeoAlgorithm):
     # used when calling the algorithm from another algorithm, or when
     # calling from the QGIS console.
 
+    TABLE_NAME = 'TABLE_NAME'
     ROADS_LAYER = 'ROADS_LAYER'
     ID_FIELD = 'ID_FIELD'
     NAME_FIELD = 'NAME_FIELD'
@@ -70,6 +71,11 @@ class StandardizeRoadNetwork(GeoAlgorithm):
         # The branch of the toolbox under which the algorithm will appear
         #self.group = 'Algorithms for vector layers'
         self.group = 'Network Analysis'
+
+        # name for new table
+        # mandatory
+        self.addParameter(ParameterString(self.TABLE_NAME,
+            self.tr('Name of table to be created'), optional=False))
 
         # 1 - Input roads layer. Must be line type
         # It is a mandatory (not optional) one, hence the False argument
@@ -102,7 +108,53 @@ class StandardizeRoadNetwork(GeoAlgorithm):
 
     def processAlgorithm(self, progress):
         # Retrieve the values of the parameters entered by the user
-        # 1 - roads layer
+        tableName = self.getParameterValue(self.TABLE_NAME)
         roadsLayer = dataobjects.getObjectFromUri(self.getParameterValue(self.ROADS_LAYER))
+        fieldIdOrig = self.getParameterValue(self.ID_FIELD)
+        fieldName = self.getParameterValue(self.NAME_FIELD)
+        fieldADT = self.getParameterValue(self.ADT_FIELD)
+        fieldSpeed = self.getParameterValue(self.SPEED_FIELD)
+        overwrite = self.getParameterValue(self.OVERWRITE)
 
+        # establish db connection
         roadsDb = LayerDbInfo(roadsLayer.source())
+        dbHost = roadsDb.getHost()
+        dbPort = roadsDb.getPort()
+        dbName = roadsDb.getDBName()
+        dbUser = roadsDb.getUser()
+        dbPass = roadsDb.getPassword()
+        dbSchema = roadsDb.getSchema()
+        dbType = roadsDb.getType()
+        dbSRID = roadsDb.getSRID()
+        try:
+            db = postgis_utils.GeoDB(host=dbHost,
+                                     port=dbPort,
+                                     dbname=dbName,
+                                     user=dbUser,
+                                     passwd=dbPass)
+        except postgis_utils.DbError, e:
+            raise GeoAlgorithmExecutionException(
+                self.tr("Couldn't connect to database:\n%s" % e.message))
+
+        # check for existing table, delete or raise error
+        tables = db.list_geotables(schema=dbSchema)
+        tableNames = [table[0] for table in tables]
+        if tableName in tableNames:
+            if overwrite:
+                db.delete_geometry_table(tableName, schema=dbSchema)
+            else:
+                raise GeoAlgorithmExecutionException(
+                    self.tr('Table %s already exists' % tableName))
+
+        # create new table, starting with new fields
+        db.create_table(tableName,[postgis_utils.TableField('id','serial'),
+                                   postgis_utils.TableField('name','text'),
+                                   postgis_utils.TableField('adt','int'),
+                                   postgis_utils.TableField('speed_mph','int')],
+                        pkey='id',
+                        schema=dbSchema)
+
+        db.add_geometry_column(tableName, dbType, schema=dbSchema,
+                               geom_column='geom', srid=dbSRID)
+
+        db.create_spatial_index(tableName, schema=dbSchema, geom_column='geom')

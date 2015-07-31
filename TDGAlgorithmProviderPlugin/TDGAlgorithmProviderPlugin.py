@@ -41,7 +41,7 @@ if cmd_folder not in sys.path:
 
 class TDGAlgorithmProviderPlugin:
 
-    def __init__(self):
+    def __init__(self,iface):
         self.provider = TDGAlgorithmProvider()
 
     def initGui(self):

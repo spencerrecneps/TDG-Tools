@@ -32,4 +32,4 @@ def classFactory(iface):  # pylint: disable=invalid-name
     """
     #
     from .TDGAlgorithmProviderPlugin import TDGAlgorithmProviderPlugin
-    return TDGAlgorithmProviderPlugin()
+    return TDGAlgorithmProviderPlugin(iface)
