@@ -25,7 +25,7 @@ __copyright__ = '(C) 2015, Spencer Gardner'
 
 __revision__ = '$Format:%H$'
 
-from PyQt4.QtCore import QSettings
+from PyQt4.QtCore import QSettings, QVariant
 from qgis.core import QgsDataSourceURI, QgsVectorLayerImport, QGis, QgsFeature, QgsGeometry
 
 import processing
@@ -59,6 +59,7 @@ class StandardizeRoadNetwork(GeoAlgorithm):
     ADT_FIELD = 'ADT_FIELD'
     SPEED_FIELD = 'SPEED_FIELD'
     OVERWRITE = 'OVERWRITE'
+    DELETE_SOURCE = 'DELETE_SOURCE'
 
     def defineCharacteristics(self):
         """Here we define the inputs and output of the algorithm, along
@@ -106,18 +107,23 @@ class StandardizeRoadNetwork(GeoAlgorithm):
         self.addParameter(ParameterBoolean(self.OVERWRITE,
             self.tr('Overwrite'), default=True))
 
+        # Delete source table?
+        self.addParameter(ParameterBoolean(self.DELETE_SOURCE,
+            self.tr('Delete source table'), default=False))
+
     def processAlgorithm(self, progress):
         # Retrieve the values of the parameters entered by the user
-        tableName = self.getParameterValue(self.TABLE_NAME)
-        roadsLayer = dataobjects.getObjectFromUri(self.getParameterValue(self.ROADS_LAYER))
+        tableName = self.getParameterValue(self.TABLE_NAME).strip().lower()
+        inLayer = dataobjects.getObjectFromUri(self.getParameterValue(self.ROADS_LAYER))
         fieldIdOrig = self.getParameterValue(self.ID_FIELD)
         fieldName = self.getParameterValue(self.NAME_FIELD)
         fieldADT = self.getParameterValue(self.ADT_FIELD)
         fieldSpeed = self.getParameterValue(self.SPEED_FIELD)
         overwrite = self.getParameterValue(self.OVERWRITE)
+        delSource = self.getParameterValue(self.DELETE_SOURCE)
 
         # establish db connection
-        roadsDb = LayerDbInfo(roadsLayer.source())
+        roadsDb = LayerDbInfo(inLayer.source())
         dbHost = roadsDb.getHost()
         dbPort = roadsDb.getPort()
         dbName = roadsDb.getDBName()
@@ -147,10 +153,63 @@ class StandardizeRoadNetwork(GeoAlgorithm):
                     self.tr('Table %s already exists' % tableName))
 
         # create new table, starting with new fields
-        db.create_table(tableName,[postgis_utils.TableField('id','serial'),
-                                   postgis_utils.TableField('name','text'),
-                                   postgis_utils.TableField('adt','int'),
-                                   postgis_utils.TableField('speed_mph','int')],
+        fieldList = [
+            {'name': 'id', 'pgtype': 'serial'},#, 'type': QVariant.Int},
+            {'name': 'road_name', 'pgtype': 'text'},#, 'type': QVariant.String},
+            {'name': 'source_id', 'pgtype': 'int'},#, 'type': QVariant.Int},
+            {'name': 'functional_class', 'pgtype': 'text'},#, 'type': QVariant.String},
+            {'name': 'one_way', 'pgtype': 'int'},#, 'type': QVariant.Int},
+            {'name': 'speed_limit', 'pgtype': 'int'},#, 'type': QVariant.Int},
+            {'name': 'adt', 'pgtype': 'int'},#, 'type': QVariant.Int},
+            {'name': 'ft_seg_lanes_thru', 'pgtype': 'int'},#, 'type': QVariant.Int},
+            {'name': 'ft_seg_lanes_bike_wd_ft', 'pgtype': 'int'},#, 'type': QVariant.Int},
+            {'name': 'ft_seg_lanes_park_wd_ft', 'pgtype': 'int'},#, 'type': QVariant.Int},
+            {'name': 'ft_seg_stress_override', 'pgtype': 'int'},#, 'type': QVariant.Int},
+            {'name': 'ft_seg_stress', 'pgtype': 'int'},#, 'type': QVariant.Int},
+            {'name': 'ft_int_lanes_thru', 'pgtype': 'int'},#, 'type': QVariant.Int},
+            {'name': 'ft_int_lanes_lt', 'pgtype': 'int'},#, 'type': QVariant.Int},
+            {'name': 'ft_int_lanes_rt_len_ft', 'pgtype': 'int'},#, 'type': QVariant.Int},
+            {'name': 'ft_int_lanes_rt_radius_speed_mph', 'pgtype': 'int'},#, 'type': QVariant.Int},
+            {'name': 'ft_int_lanes_bike_wd_ft', 'pgtype': 'int'},#, 'type': QVariant.Int},
+            {'name': 'ft_int_lanes_bike_straight', 'pgtype': 'int'},#, 'type': QVariant.Int},
+            {'name': 'ft_int_stress_override', 'pgtype': 'int'},#, 'type': QVariant.Int},
+            {'name': 'ft_int_stress', 'pgtype': 'int'},#, 'type': QVariant.Int},
+            {'name': 'ft_cross_median_wd_ft', 'pgtype': 'int'},#, 'type': QVariant.Int},
+            {'name': 'ft_cross_signal', 'pgtype': 'int'},#, 'type': QVariant.Int},
+            {'name': 'ft_cross_speed_limit', 'pgtype': 'int'},#, 'type': QVariant.Int},
+            {'name': 'ft_cross_lanes', 'pgtype': 'int'},#, 'type': QVariant.Int},
+            {'name': 'ft_cross_stress_override', 'pgtype': 'int'},#, 'type': QVariant.Int},
+            {'name': 'ft_cross_stress', 'pgtype': 'int'},#, 'type': QVariant.Int},
+            {'name': 'tf_seg_lanes_thru', 'pgtype': 'int'},#, 'type': QVariant.Int},
+            {'name': 'tf_seg_lanes_bike_wd_ft', 'pgtype': 'int'},#, 'type': QVariant.Int},
+            {'name': 'tf_seg_lanes_park_wd_ft', 'pgtype': 'int'},#, 'type': QVariant.Int},
+            {'name': 'tf_seg_stress_override', 'pgtype': 'int'},#, 'type': QVariant.Int},
+            {'name': 'tf_seg_stress', 'pgtype': 'int'},#, 'type': QVariant.Int},
+            {'name': 'tf_int_lanes_thru', 'pgtype': 'int'},#, 'type': QVariant.Int},
+            {'name': 'tf_int_lanes_lt', 'pgtype': 'int'},#, 'type': QVariant.Int},
+            {'name': 'tf_int_lanes_rt_len_ft', 'pgtype': 'int'},#, 'type': QVariant.Int},
+            {'name': 'tf_int_lanes_rt_radius_speed_mph', 'pgtype': 'int'},#, 'type': QVariant.Int},
+            {'name': 'tf_int_lanes_bike_wd_ft', 'pgtype': 'int'},#, 'type': QVariant.Int},
+            {'name': 'tf_int_lanes_bike_straight', 'pgtype': 'int'},#, 'type': QVariant.Int},
+            {'name': 'tf_int_stress_override', 'pgtype': 'int'},#, 'type': QVariant.Int},
+            {'name': 'tf_int_stress', 'pgtype': 'int'},#, 'type': QVariant.Int},
+            {'name': 'tf_cross_median_wd_ft', 'pgtype': 'int'},#, 'type': QVariant.Int},
+            {'name': 'tf_cross_signal', 'pgtype': 'int'},#, 'type': QVariant.Int},
+            {'name': 'tf_cross_speed_limit', 'pgtype': 'int'},#, 'type': QVariant.Int},
+            {'name': 'tf_cross_lanes', 'pgtype': 'int'},#, 'type': QVariant.Int},
+            {'name': 'tf_cross_stress_override', 'pgtype': 'int'},#, 'type': QVariant.Int},
+            {'name': 'tf_cross_stress', 'pgtype': 'int'},#, 'type': QVariant.Int},
+            {'name': 'source', 'pgtype': 'int'},#, 'type': QVariant.Int},
+            {'name': 'target', 'pgtype': 'int'},#, 'type': QVariant.Int},
+            {'name': 'cost', 'pgtype': 'int'},#, 'type': QVariant.Int},
+            {'name': 'reverse_cost', 'pgtype': 'int'}#, 'type': QVariant.Int}
+        ]
+
+        dbFields = []
+        for f in fieldList:
+            dbFields.append(postgis_utils.TableField(f['name'],f['pgtype']))
+        db.create_table(tableName,
+                        dbFields,
                         pkey='id',
                         schema=dbSchema)
 
@@ -158,3 +217,34 @@ class StandardizeRoadNetwork(GeoAlgorithm):
                                geom_column='geom', srid=dbSRID)
 
         db.create_spatial_index(tableName, schema=dbSchema, geom_column='geom')
+
+        # set up the new table's uri and get new object
+        uri = QgsDataSourceURI()
+        uri.setConnection(dbHost, str(dbPort), dbName, dbUser, dbPass)
+        uri.setDataSource(dbSchema, tableName, 'geom', 'id')
+        outLayer = dataobjects.getObjectFromUri(uri.uri(),forceLoad=True)
+
+        # iterate road features and add to new table
+        outFields = outLayer.dataProvider().fields()
+        inGeom = QgsGeometry()
+        for feature in vector.features(inLayer):
+            outFeat = QgsFeature(outFields)
+            inGeom = feature.geometry()
+            outFeat.setGeometry(inGeom)
+            if fieldIdOrig:
+                outFeat.setAttribute('id',feature.attribute(fieldIdOrig))
+            if fieldName:
+                outFeat.setAttribute('road_name',feature.attribute(fieldName))
+            if fieldADT:
+                outFeat.setAttribute('adt',feature.attribute(fieldADT))
+            if fieldSpeed:
+                outFeat.setAttribute('speed_limit',feature.attribute(fieldSpeed))
+            outLayer.addFeature(outFeat)
+            del outFeat
+        outLayer.commitChanges()
+        #iface.addVectorLayer(uri.uri(),tableName,'postgres')
+
+
+        # delete source table
+        if delSource:
+            db.delete_geometry_table(roadsDb.getTable(),schema=roadsDb.getSchema())

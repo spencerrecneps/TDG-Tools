@@ -148,7 +148,7 @@ class CreateRoadNetwork(GeoAlgorithm):
         processing.runalg("qgis:postgisexecutesql",database,
             "CREATE EXTENSION IF NOT EXISTS tdg")
 
-        # set up connection to the db
+        # set up the new table's uri
         uri = QgsDataSourceURI()
         uri.setConnection(host, str(port), database, username, password)
         uri.setDataSource('tdg', table, 'geom', 'id')
@@ -157,7 +157,7 @@ class CreateRoadNetwork(GeoAlgorithm):
         fields = roadsLayer.dataProvider().fields()
         geomType = QGis.WKBLineString
 
-        newTable = QgsVectorLayerImport(
+        outLayer = QgsVectorLayerImport(
             uri.uri(),
             providerName,
             fields,
@@ -183,9 +183,10 @@ class CreateRoadNetwork(GeoAlgorithm):
             for g in geometries:
                 g.transform(crsTransform)
                 outFeat.setGeometry(g)
-                newTable.addFeature(outFeat)
+                outLayer.addFeature(outFeat)
 
-        del newTable
+        del outLayer
+        outLayer.commitChanges()
         db.create_spatial_index(table, 'tdg', 'geom')
         db.vacuum_analyze(table, 'tdg')
 
