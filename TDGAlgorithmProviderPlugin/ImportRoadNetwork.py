@@ -2,7 +2,7 @@
 
 """
 ***************************************************************************
-    __init__.py
+    ImportRoadNetwork.py
     ---------------------
     Date                 : July 2015
     Copyright            : (C) 2015 by Spencer Gardner
@@ -42,9 +42,9 @@ from processing.tools import dataobjects, vector
 from processing.algs.qgis import postgis_utils
 
 
-class CreateRoadNetwork(GeoAlgorithm):
-    """This algorithm takes an input road dataset and converts
-    it into a standardized format for use in stress analysis
+class ImportRoadNetwork(GeoAlgorithm):
+    """This algorithm takes an input road dataset and
+    uploads it to a PostGIS database for use in stress analysis
     and other tasks.
     """
 

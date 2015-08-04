@@ -2,7 +2,7 @@
 
 """
 ***************************************************************************
-    __init__.py
+    TDGAlgorithmProvider.py
     ---------------------
     Date                 : July 2015
     Copyright            : (C) 2013 by Spencer Gardner
@@ -30,7 +30,7 @@ from processing.core.ProcessingConfig import Setting, ProcessingConfig
 
 from processing.script.ScriptUtils import ScriptUtils
 
-from CreateRoadNetwork import CreateRoadNetwork
+from ImportRoadNetwork import ImportRoadNetwork
 from StandardizeRoadNetwork import StandardizeRoadNetwork
 
 
@@ -43,7 +43,7 @@ class TDGAlgorithmProvider(AlgorithmProvider):
         self.activate = True
 
         # Load algorithms
-        self.alglist = [CreateRoadNetwork(),StandardizeRoadNetwork()]
+        self.alglist = [ImportRoadNetwork(),StandardizeRoadNetwork()]
         for alg in self.alglist:
             alg.provider = self
 
