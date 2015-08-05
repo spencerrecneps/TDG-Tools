@@ -244,7 +244,6 @@ class StandardizeRoadNetwork(GeoAlgorithm):
         outLayer.commitChanges()
         #iface.addVectorLayer(uri.uri(),tableName,'postgres')
 
-
         # delete source table
         if delSource:
             db.delete_geometry_table(roadsDb.getTable(),schema=roadsDb.getSchema())

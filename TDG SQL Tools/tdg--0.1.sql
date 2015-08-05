@@ -12,7 +12,7 @@ DECLARE
     query text;
     sourcetable text;
     verttable text;
-    linkverttable text;
+    linktable text;
     turnrestricttable text;
     sridinfo record;
     srid int;
@@ -22,7 +22,7 @@ BEGIN
 
     --check table and schema
     BEGIN
-        RAISE DEBUG 'Cheking % exists',t_name;
+        RAISE DEBUG 'Checking % exists',t_name;
         execute 'select * from pgr_getTableName('||quote_literal(t_name)||')' into namecheck;
         sname=namecheck.sname;
         tname=namecheck.tname;
@@ -35,14 +35,55 @@ BEGIN
 
         sourcetable = sname || '.' || tname;
         verttable = sname || '.' || tname || '_net_vert';
-        linkverttable = sname || '.' || tname || '_net_link_node';
+        linktable = sname || '.' || tname || '_net_link';
         turnrestricttable = sname || '.' || tname || '_turn_restriction';
     END;
 
+    --snap geom to grid to nearest 2 ft
+    BEGIN
+        RAISE DEBUG 'snapping road geometries';
+        EXECUTE format('
+            UPDATE  %s
+            SET     geom = ST_SnapToGrid(geom,2);
+            ',  sourcetable);
+    END;
+
+    --check for from/to columns
+    BEGIN
+        RAISE DEBUG 'checking for source/target columns';
+        IF EXISTS (
+            SELECT 1 FROM pg_attribute
+            WHERE  attrelid = tname::regclass
+            AND    attname = 'source'
+            AND    NOT attisdropped)
+        THEN
+            EXECUTE format('
+                UPDATE %s SET source=NULL;
+                ',  sourcetable);
+        ELSE
+            EXECUTE format('
+                ALTER TABLE %s ADD COLUMN source INT;
+                ',  sourcetable);
+        END IF;
+        IF EXISTS (
+            SELECT 1 FROM pg_attribute
+            WHERE  attrelid = tname::regclass
+            AND    attname = 'target'
+            AND    NOT attisdropped)
+        THEN
+            EXECUTE format('
+                UPDATE %s SET target=NULL;
+                ',  sourcetable);
+        ELSE
+            EXECUTE format('
+                ALTER TABLE %s ADD COLUMN target INT;
+                ',  sourcetable);
+        END IF;
+    END;
 
     --get srid of the geom
     BEGIN
-        raise DEBUG 'Checking the SRID of the geometry';
+        RAISE DEBUG 'Checking the SRID of the geometry';
         query= '  SELECT ST_SRID(geom) as srid
                 FROM ' || pgr_quote_ident(t_name) || '
                 WHERE geom IS NOT NULL LIMIT 1';
@@ -59,19 +100,21 @@ BEGIN
             RETURN 'FAIL';
     END;
 
+    --drop old tables
     BEGIN
-        --drop old tables
-        raise DEBUG 'dropping tables';
+        RAISE DEBUG 'dropping tables';
         EXECUTE format('
             DROP TABLE IF EXISTS %s;
             DROP TABLE IF EXISTS %s;
             DROP TABLE IF EXISTS %s;
             ',  turnrestricttable,
                 verttable,
-                linkverttable);
+                linktable);
     END;
 
+    --create new tables
     BEGIN
+        raise DEBUG 'creating new tables';
         EXECUTE format('
             CREATE TABLE %s (   id serial PRIMARY KEY,
                                 node_id TEXT,
@@ -91,22 +134,35 @@ BEGIN
         EXECUTE format('
             CREATE TABLE %s (   id serial primary key,
                                 road_id INT,
-                                node_id INT);
-            ',  linkverttable);
+                                direction VARCHAR(2),
+                                cost INT,
+                                stress INT,
+                                geom geometry(linestring,%L));
+            ',  linktable,
+                srid);
     END;
 
+    --indexes
     BEGIN
-        --indexes
+        RAISE DEBUG 'creating indexes';
         EXECUTE format('
             CREATE INDEX %s ON %s USING gist (geom);
-            CREATE INDEX %s ON %s (road_id, node_id);
+            CREATE INDEX %s ON %s (road_id);
+            CREATE INDEX %s ON %s (direction);
+            CREATE INDEX %s ON %s (source,target);
             ',  'sidx_' || tname || 'vert_geom',
                 verttable,
-                'idx_' || tname || '_rdnd',
-                linkverttable);
+                'idx_' || tname || '_link_road_id',
+                linktable,
+                'idx_' || tname || '_link_direction',
+                linktable,
+                'idx_' || tname || '_srctrgt',
+                sourcetable);
     END;
 
+    --insert points into vertices table
     BEGIN
+        RAISE DEBUG 'adding points to vertices table';
         EXECUTE format('
             CREATE TEMP TABLE v (i INT, geom geometry(point,%L)) ON COMMIT DROP;
             INSERT INTO v (i, geom) SELECT id, ST_StartPoint(geom) FROM %s ORDER BY id ASC;
@@ -117,23 +173,178 @@ BEGIN
                         geom
             FROM        v
             GROUP BY    geom;
-            INSERT INTO %s (road_id, node_id)
-            SELECT  v.i,
-                    n.id
-            FROM    v,
-                    %s n
-            WHERE   v.geom = n.geom
             ',  srid,
                 sourcetable,
                 sourcetable,
                 verttable,
-                ' | ',
-                linkverttable,
-                verttable);
+                ' | ');
+    END;
+
+    --get source/target info
+    BEGIN
+        RAISE DEBUG 'getting source/target info';
+        EXECUTE format('
+            UPDATE  %s
+            SET     source = vf.id,
+                    target = vt.id
+            FROM    %s vf,
+                    %s vt
+            WHERE   ST_StartPoint(%I.geom) = vf.geom
+            AND     ST_EndPoint(%I.geom) = vt.geom
+            ',  sourcetable,
+                verttable,
+                verttable,
+                tname,
+                tname);
+    END;
+
+    --populate links table
+    BEGIN
+        RAISE DEBUG 'adding links';
+        EXECUTE format('
+            CREATE TEMP TABLE lengths ( id SERIAL PRIMARY KEY,
+                                        len FLOAT,
+                                        f_point geometry(point, %L),
+                                        t_point geometry(point, %L))
+            ON COMMIT DROP;
+            ',  srid,
+                srid);
+
+        EXECUTE format('
+            INSERT INTO lengths (id, len, f_point, t_point)
+            SELECT  id,
+                    ST_Length(geom) AS len,
+                    ST_LineInterpolatePoint(geom,LEAST(0.5*ST_Length(geom)-5,50.0)/ST_Length(geom)) AS f_point,
+                    ST_LineInterpolatePoint(geom,GREATEST(0.5*ST_Length(geom)+5,ST_Length(geom)-50)/ST_Length(geom)) AS t_point
+            FROM    %s;
+            ',  sourcetable);
+
+        --self segment ft
+        EXECUTE format('
+            INSERT INTO %s (geom,
+                            direction,
+                            road_id,
+                            cost)
+            SELECT  ST_Makeline(l.f_point,l.t_point),
+                    %L,
+                    r.id,
+                    r.cost
+            FROM    %s r,
+                    lengths l
+            WHERE   r.id=l.id
+            AND     (r.one_way IS NULL OR r.one_way = %L);
+            ',  linktable,
+                'ft',
+                sourcetable,
+                'ft');
+
+        --self segment tf
+        EXECUTE format('
+            INSERT INTO %s (geom,
+                            direction,
+                            road_id,
+                            cost)
+            SELECT  ST_Makeline(l.t_point,l.f_point),
+                    %L,
+                    r.id,
+                    r.cost
+            FROM    %s r,
+                    lengths l
+            WHERE   r.id=l.id
+            AND     (r.one_way IS NULL OR r.one_way = %L);
+            ',  linktable,
+                'tf',
+                sourcetable,
+                'tf');
+
+        --from end to start
+        EXECUTE format('
+            INSERT INTO %s (geom)
+            SELECT  ST_Makeline(fl.t_point,tl.f_point)
+            FROM    %s f,
+                    %s t,
+                    lengths fl,
+                    lengths tl
+            WHERE   f.id != t.id
+            AND     f.target = t.source
+            AND     f.id = fl.id
+            AND     t.id = tl.id
+            AND     (f.one_way IS NULL OR f.one_way = %L)
+            AND     (t.one_way IS NULL OR t.one_way = %L);
+            ',  linktable,
+                sourcetable,
+                sourcetable,
+                'ft',
+                'ft');
+
+        --from end to end
+        EXECUTE format('
+            INSERT INTO %s (geom)
+            SELECT  ST_Makeline(fl.t_point,tl.t_point)
+            FROM    %s f,
+                    %s t,
+                    lengths fl,
+                    lengths tl
+            WHERE   f.id != t.id
+            AND     f.target = t.target
+            AND     f.id = fl.id
+            AND     t.id = tl.id
+            AND     (f.one_way IS NULL OR f.one_way = %L)
+            AND     (t.one_way IS NULL OR t.one_way = %L);
+            ',  linktable,
+                sourcetable,
+                sourcetable,
+                'ft',
+                'tf');
+
+        --from start to end
+        EXECUTE format('
+            INSERT INTO %s (geom)
+            SELECT  ST_Makeline(fl.f_point,tl.t_point)
+            FROM    %s f,
+                    %s t,
+                    lengths fl,
+                    lengths tl
+            WHERE   f.id != t.id
+            AND     f.source = t.target
+            AND     f.id = fl.id
+            AND     t.id = tl.id
+            AND     (f.one_way IS NULL OR f.one_way = %L)
+            AND     (t.one_way IS NULL OR t.one_way = %L);
+            ',  linktable,
+                sourcetable,
+                sourcetable,
+                'tf',
+                'tf');
+
+        --from start to start
+        EXECUTE format('
+            INSERT INTO %s (geom)
+            SELECT  ST_Makeline(fl.f_point,tl.f_point)
+            FROM    %s f,
+                    %s t,
+                    lengths fl,
+                    lengths tl
+            WHERE   f.id != t.id
+            AND     f.source = t.source
+            AND     f.id = fl.id
+            AND     t.id = tl.id
+            AND     (f.one_way IS NULL OR f.one_way = %L)
+            AND     (t.one_way IS NULL OR t.one_way = %L);
+            ',  linktable,
+                sourcetable,
+                sourcetable,
+                'tf',
+                'ft');
     END;
 RETURN 'success';
 END $func$ LANGUAGE plpgsql;
 
+
+--trigger needs
+--cost update on source roads
+--geom update/delete/add on source roads
+--add/delete from turn restrictions
 
 CREATE OR REPLACE FUNCTION GenerateCrossStreetData(anyelement)
 --populate cross-street data
