@@ -184,9 +184,8 @@ class ImportRoadNetwork(GeoAlgorithm):
                 g.transform(crsTransform)
                 outFeat.setGeometry(g)
                 outLayer.addFeature(outFeat)
-
+        
         del outLayer
-        outLayer.commitChanges()
         db.create_spatial_index(table, 'tdg', 'geom')
         db.vacuum_analyze(table, 'tdg')
 

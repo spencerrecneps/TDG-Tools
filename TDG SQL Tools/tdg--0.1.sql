@@ -1,8 +1,192 @@
 -- complain if script is sourced in psql, rather than via CREATE EXTENSION
 \echo Use "CREATE EXTENSION tdg" to load this file. \quit
 
+CREATE OR REPLACE FUNCTION StandardizeRoadLayer(input_table REGCLASS,
+                                                output_table TEXT,
+                                                id_field TEXT,
+                                                name_field TEXT,
+                                                adt_field TEXT,
+                                                speed_field TEXT,
+                                                func_field TEXT,
+                                                oneway_field TEXT,
+                                                overwrite BOOLEAN,
+                                                delete_source BOOLEAN)
+RETURNS VARCHAR AS $func$
+
+DECLARE
+    namecheck RECORD;
+    intabname TEXT;
+    schemaname TEXT;
+    outtabname TEXT;
+    query TEXT;
+    sridinfo RECORD;
+    srid INT;
+    id INT;
+    name INT;
+    adt INT;
+    speed INT;
+    func INT;
+    oneway INT;
+
+BEGIN
+    raise notice 'PROCESSING:';
+
+    --get schema
+    BEGIN
+        schemaname = 'tdg';
+        outtabname = schemaname||'.'||output_table;
+    END;
+
+    --get srid of the geom
+    BEGIN
+        RAISE DEBUG 'Checking the SRID of the geometry';
+        query= '  SELECT ST_SRID(geom) as srid
+                FROM ' || input_table::TEXT || '
+                WHERE geom IS NOT NULL LIMIT 1';
+        EXECUTE QUERY INTO sridinfo;
+
+        IF sridinfo IS NULL OR sridinfo.srid IS NULL THEN
+            RAISE NOTICE 'ERROR: Can not determine the srid of the geometry in table %', t_name;
+            RETURN 'FAIL';
+        END IF;
+        srid := sridinfo.srid;
+        raise DEBUG '  -----> SRID found %',srid;
+        EXCEPTION WHEN OTHERS THEN
+            RAISE NOTICE 'ERROR: Can not determine the srid of the geometry "%" in table %', the_geom,tabname;
+            RETURN 'FAIL';
+    END;
+
+    --check field names
+    /*BEGIN
+        id = NULL;
+        name = NULL;
+        adt = NULL;
+        speed = NULL;
+        func = NULL;
+        oneway = NULL;
+        IF NOT id_field IS NULL THEN id = id_field::INT; END IF;
+        IF NOT name_field IS NULL THEN name = name_field::INT; END IF;
+        IF NOT adt_field IS NULL THEN adt = adt_field; END IF;
+        IF NOT speed_field IS NULL THEN speed = speed_field; END IF;
+        IF NOT func_field IS NULL THEN func = func_field; END IF;
+        IF NOT oneway_field IS NULL THEN oneway = oneway_field; END IF;
+    END;*/
+
+    --create new table
+    BEGIN
+        EXECUTE format('
+            CREATE TABLE %s (   id SERIAL PRIMARY KEY,
+                                geom geometry(linestring,%L),
+                                road_name TEXT,
+                                source_id INT,
+                                functional_class INT,
+                                one_way VARCHAR(2),
+                                speed_limit INT,
+                                adt INT,
+                                ft_seg_lanes_thru INT,
+                                ft_seg_lanes_bike_wd_ft INT,
+                                ft_seg_lanes_park_wd_ft INT,
+                                ft_seg_stress_override INT,
+                                ft_seg_stress INT,
+                                ft_int_lanes_thru INT,
+                                ft_int_lanes_lt INT,
+                                ft_int_lanes_rt_len_ft INT,
+                                ft_int_lanes_rt_radius_speed_mph INT,
+                                ft_int_lanes_bike_wd_ft INT,
+                                ft_int_lanes_bike_straight INT,
+                                ft_int_stress_override INT,
+                                ft_int_stress INT,
+                                ft_cross_median_wd_ft INT,
+                                ft_cross_signal INT,
+                                ft_cross_speed_limit INT,
+                                ft_cross_lanes INT,
+                                ft_cross_stress_override INT,
+                                ft_cross_stress INT,
+                                tf_seg_lanes_thru INT,
+                                tf_seg_lanes_bike_wd_ft INT,
+                                tf_seg_lanes_park_wd_ft INT,
+                                tf_seg_stress_override INT,
+                                tf_seg_stress INT,
+                                tf_int_lanes_thru INT,
+                                tf_int_lanes_lt INT,
+                                tf_int_lanes_rt_len_ft INT,
+                                tf_int_lanes_rt_radius_speed_mph INT,
+                                tf_int_lanes_bike_wd_ft INT,
+                                tf_int_lanes_bike_straight INT,
+                                tf_int_stress_override INT,
+                                tf_int_stress INT,
+                                tf_cross_median_wd_ft INT,
+                                tf_cross_signal INT,
+                                tf_cross_speed_limit INT,
+                                tf_cross_lanes INT,
+                                tf_cross_stress_override INT,
+                                tf_cross_stress INT,
+                                source INT,
+                                target INT,
+                                cost INT,
+                                reverse_cost INT)
+            ',  outtabname,
+                srid);
+    END;
+
+    --copy features over
+    BEGIN
+        query := '';
+        query := '   INSERT INTO ' || outtabname || ' (geom';
+        IF name_field IS NOT NULL THEN
+            query := query || ',road_name';
+            END IF;
+        IF id_field IS NOT NULL THEN
+            query := query || ',source_id';
+            END IF;
+        IF func_field IS NOT NULL THEN
+            query := query || ',functional_class';
+            END IF;
+        IF oneway_field IS NOT NULL THEN
+            query := query || ',one_way';
+            END IF;
+        IF speed_field IS NOT NULL THEN
+            query := query || ',speed_limit';
+            END IF;
+        IF adt_field IS NOT NULL THEN
+            query := query || ',adt';
+            END IF;
+        query := query || ') SELECT ST_SnapToGrid(r.geom,2)';
+        IF name_field IS NOT NULL THEN
+            query := query || ',' || name_field;
+            END IF;
+        IF id_field IS NOT NULL THEN
+            query := query || ',' || id_field;
+            END IF;
+        IF func_field IS NOT NULL THEN
+            query := query || ',' || func_field;
+            END IF;
+        IF oneway_field IS NOT NULL THEN
+            query := query || ',' || oneway_field;
+            END IF;
+        IF speed_field IS NOT NULL THEN
+            query := query || ',' || speed_field;
+            END IF;
+        IF adt_field IS NOT NULL THEN
+            query := query || ',' || adt_field;
+            END IF;
+        query := query || ' FROM ' ||input_table::TEXT|| ' r';
+
+        EXECUTE query;
+    END;
+
+    RETURN 'success';
+END $func$ LANGUAGE plpgsql;
+
+
+
+
+
+
+
+
 CREATE OR REPLACE FUNCTION MakeNetwork(t_name varchar(50))
---sets triggers to automatically update vertices
+--need triggers to automatically update vertices and links
 RETURNS VARCHAR AS $func$
 
 DECLARE
@@ -21,6 +205,7 @@ BEGIN
     raise notice 'PROCESSING:';
 
     --check table and schema
+    --need to redo without reliance on pgrouting
     BEGIN
         RAISE DEBUG 'Checking % exists',t_name;
         execute 'select * from pgr_getTableName('||quote_literal(t_name)||')' into namecheck;
@@ -212,12 +397,24 @@ BEGIN
 
         EXECUTE format('
             INSERT INTO lengths (id, len, f_point, t_point)
-            SELECT  id,
-                    ST_Length(geom) AS len,
-                    ST_LineInterpolatePoint(geom,LEAST(0.5*ST_Length(geom)-5,50.0)/ST_Length(geom)) AS f_point,
-                    ST_LineInterpolatePoint(geom,GREATEST(0.5*ST_Length(geom)+5,ST_Length(geom)-50)/ST_Length(geom)) AS t_point
-            FROM    %s;
-            ',  sourcetable);
+            SELECT  s.id,
+                    ST_Length(s.geom) AS len,
+                    CASE    WHEN vf.node_order > 2
+                            THEN ST_LineInterpolatePoint(s.geom,LEAST(0.5*ST_Length(s.geom)-5,50.0)/ST_Length(s.geom))
+                            ELSE ST_StartPoint(s.geom)
+                            END AS f_point,
+                    CASE    WHEN vt.node_order > 2
+                            THEN ST_LineInterpolatePoint(s.geom,GREATEST(0.5*ST_Length(s.geom)+5,ST_Length(s.geom)-50)/ST_Length(s.geom))
+                            ELSE ST_EndPoint(s.geom)
+                            END AS t_point
+            FROM    %s s,
+                    %s vf,
+                    %s vt
+            WHERE   s.source = vf.id
+            AND     s.target = vt.id;
+            ',  sourcetable,
+                verttable,
+                verttable);
 
         --self segment ft
         EXECUTE format('

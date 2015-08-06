@@ -142,6 +142,48 @@ class StandardizeRoadNetwork(GeoAlgorithm):
             raise GeoAlgorithmExecutionException(
                 self.tr("Couldn't connect to database:\n%s" % e.message))
 
+
+        settings = QSettings()
+        mySettings = '/PostgreSQL/connections/' + dbName
+        try:
+            database = settings.value(mySettings + '/database')
+        except Exception, e:
+            raise GeoAlgorithmExecutionException(
+                self.tr('Wrong database connection name: %s' % connection))
+
+        sql = 'select StandardizeRoadLayer('
+        sql = sql + "'" + roadsDb.getTable() + "',"
+        sql = sql + "'" + tableName + "',"
+        if fieldIdOrig is None:
+            sql = sql + 'NULL,'
+        else:
+            sql = sql + "'" + fieldIdOrig + "',"
+        if fieldName is None:
+            sql = sql + 'NULL,'
+        else:
+            sql = sql + "'" + fieldName + "',"
+        if fieldADT is None:
+            sql = sql + 'NULL,'
+        else:
+            sql = sql + "'" + fieldADT + "',"
+        if fieldSpeed is None:
+            sql = sql + 'NULL,'
+        else:
+            sql = sql + "'" + fieldSpeed + "',"
+        sql = sql + 'NULL,'  #func class
+        sql = sql + 'NULL,'  #oneway
+        if overwrite:
+            sql = sql + "'t',"
+        else:
+            sql = sql + "'f',"
+        if delSource:
+            sql = sql + "'t')"
+        else:
+            sql = sql + "'f')"
+
+        processing.runalg("qgis:postgisexecutesql",database,
+            sql)
+"""
         # check for existing table, delete or raise error
         tables = db.list_geotables(schema=dbSchema)
         tableNames = [table[0] for table in tables]
@@ -247,3 +289,4 @@ class StandardizeRoadNetwork(GeoAlgorithm):
         # delete source table
         if delSource:
             db.delete_geometry_table(roadsDb.getTable(),schema=roadsDb.getSchema())
+"""
