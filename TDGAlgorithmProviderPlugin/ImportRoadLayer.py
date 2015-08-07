@@ -2,7 +2,7 @@
 
 """
 ***************************************************************************
-    ImportRoadNetwork.py
+    ImportRoadLayer.py
     ---------------------
     Date                 : July 2015
     Copyright            : (C) 2015 by Spencer Gardner
@@ -42,7 +42,7 @@ from processing.tools import dataobjects, vector
 from processing.algs.qgis import postgis_utils
 
 
-class ImportRoadNetwork(GeoAlgorithm):
+class ImportRoadLayer(GeoAlgorithm):
     """This algorithm takes an input road dataset and
     uploads it to a PostGIS database for use in stress analysis
     and other tasks.
@@ -184,7 +184,7 @@ class ImportRoadNetwork(GeoAlgorithm):
                 g.transform(crsTransform)
                 outFeat.setGeometry(g)
                 outLayer.addFeature(outFeat)
-        
+
         del outLayer
         db.create_spatial_index(table, 'tdg', 'geom')
         db.vacuum_analyze(table, 'tdg')

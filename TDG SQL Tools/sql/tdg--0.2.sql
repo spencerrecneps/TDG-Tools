@@ -187,191 +187,18 @@ VALUES  (25,3,1),
         (99,3,3),
         (99,5,4),
         (99,99,4);
-CREATE OR REPLACE FUNCTION GenerateCrossStreetData(anyelement)
+CREATE OR REPLACE FUNCTION tdgGenerateCrossStreetData(anyelement)
 --populate cross-street data
 RETURNS INT
 LANGUAGE SQL AS
 'SELECT 1';
-CREATE OR REPLACE FUNCTION StandardizeRoadLayer(input_table REGCLASS,
-                                                output_table TEXT,
-                                                id_field TEXT,
-                                                name_field TEXT,
-                                                adt_field TEXT,
-                                                speed_field TEXT,
-                                                func_field TEXT,
-                                                oneway_field TEXT,
-                                                overwrite BOOLEAN,
-                                                delete_source BOOLEAN)
-RETURNS VARCHAR AS $func$
-
-DECLARE
-    schemaname TEXT;
-    outtabname TEXT;
-    query TEXT;
-    srid INT;
-
-BEGIN
-    raise notice 'PROCESSING:';
-
-    --get schema
-    BEGIN
-        schemaname = 'tdg';
-        outtabname = schemaname||'.'||output_table;
-    END;
-
-    --get srid of the geom
-    BEGIN
-        EXECUTE format('SELECT tdgGetSRID(to_regclass(%L),%s)',input_table,quote_literal('geom')) INTO srid;
-
-        IF srid IS NULL THEN
-            RAISE NOTICE 'ERROR: Can not determine the srid of the geometry in table %', t_name;
-            RETURN 'FAIL';
-        END IF;
-        raise DEBUG '  -----> SRID found %',srid;
-    END;
-
-    --drop new table if exists
-    BEGIN
-        IF overwrite THEN
-            RAISE NOTICE 'DROPPING TABLE %', output_table;
-            EXECUTE format('DROP TABLE IF EXISTS %s',output_table);
-        END IF;
-    END;
-
-    --create new table
-    BEGIN
-        EXECUTE format('
-            CREATE TABLE %s (   id SERIAL PRIMARY KEY,
-                                geom geometry(linestring,%L),
-                                road_name TEXT,
-                                source_id TEXT,
-                                functional_class TEXT,
-                                one_way VARCHAR(2),
-                                speed_limit INT,
-                                adt INT,
-                                ft_seg_lanes_thru INT,
-                                ft_seg_lanes_bike_wd_ft INT,
-                                ft_seg_lanes_park_wd_ft INT,
-                                ft_seg_stress_override INT,
-                                ft_seg_stress INT,
-                                ft_int_lanes_thru INT,
-                                ft_int_lanes_lt INT,
-                                ft_int_lanes_rt_len_ft INT,
-                                ft_int_lanes_rt_radius_speed_mph INT,
-                                ft_int_lanes_bike_wd_ft INT,
-                                ft_int_lanes_bike_straight INT,
-                                ft_int_stress_override INT,
-                                ft_int_stress INT,
-                                ft_cross_median_wd_ft INT,
-                                ft_cross_signal INT,
-                                ft_cross_speed_limit INT,
-                                ft_cross_lanes INT,
-                                ft_cross_stress_override INT,
-                                ft_cross_stress INT,
-                                tf_seg_lanes_thru INT,
-                                tf_seg_lanes_bike_wd_ft INT,
-                                tf_seg_lanes_park_wd_ft INT,
-                                tf_seg_stress_override INT,
-                                tf_seg_stress INT,
-                                tf_int_lanes_thru INT,
-                                tf_int_lanes_lt INT,
-                                tf_int_lanes_rt_len_ft INT,
-                                tf_int_lanes_rt_radius_speed_mph INT,
-                                tf_int_lanes_bike_wd_ft INT,
-                                tf_int_lanes_bike_straight INT,
-                                tf_int_stress_override INT,
-                                tf_int_stress INT,
-                                tf_cross_median_wd_ft INT,
-                                tf_cross_signal INT,
-                                tf_cross_speed_limit INT,
-                                tf_cross_lanes INT,
-                                tf_cross_stress_override INT,
-                                tf_cross_stress INT,
-                                source INT,
-                                target INT,
-                                cost INT,
-                                reverse_cost INT)
-            ',  outtabname,
-                srid);
-    END;
-
-    --copy features over
-    BEGIN
-        query := '';
-        query := '   INSERT INTO ' || outtabname || ' (geom';
-        IF name_field IS NOT NULL THEN
-            query := query || ',road_name';
-            END IF;
-        IF id_field IS NOT NULL THEN
-            query := query || ',source_id';
-            END IF;
-        IF func_field IS NOT NULL THEN
-            query := query || ',functional_class';
-            END IF;
-        IF oneway_field IS NOT NULL THEN
-            query := query || ',one_way';
-            END IF;
-        IF speed_field IS NOT NULL THEN
-            query := query || ',speed_limit';
-            END IF;
-        IF adt_field IS NOT NULL THEN
-            query := query || ',adt';
-            END IF;
-        query := query || ') SELECT ST_SnapToGrid(r.geom,2)';
-        IF name_field IS NOT NULL THEN
-            query := query || ',' || name_field;
-            END IF;
-        IF id_field IS NOT NULL THEN
-            query := query || ',' || id_field;
-            END IF;
-        IF func_field IS NOT NULL THEN
-            query := query || ',' || func_field;
-            END IF;
-        IF oneway_field IS NOT NULL THEN
-            query := query || ',' || oneway_field;
-            END IF;
-        IF speed_field IS NOT NULL THEN
-            query := query || ',' || speed_field;
-            END IF;
-        IF adt_field IS NOT NULL THEN
-            query := query || ',' || adt_field;
-            END IF;
-        query := query || ' FROM ' ||input_table::TEXT|| ' r';
-
-        EXECUTE query;
-    END;
-
-    RETURN 'success';
-END $func$ LANGUAGE plpgsql;
-CREATE OR REPLACE FUNCTION CalculateStress(anyelement)
---calculate stress score
-RETURNS INT
-LANGUAGE SQL AS
-'SELECT 1';
-CREATE OR REPLACE FUNCTION tdgGetSRID(input_table REGCLASS,geom_name TEXT)
-RETURNS INT AS $func$
-
-DECLARE
-    geomdetails RECORD;
-
-BEGIN
-    EXECUTE format ('
-        SELECT  ST_SRID(%s) AS srid
-        FROM    %s
-        WHERE   %s IS NOT NULL LIMIT 1
-        ',  geom_name,
-            input_table,
-            geom_name) INTO geomdetails;
-
-    RETURN geomdetails.srid;
-END $func$ LANGUAGE plpgsql;
-CREATE OR REPLACE FUNCTION MakeNetwork(input_table REGCLASS)
+CREATE OR REPLACE FUNCTION tdgMakeNetwork(input_table REGCLASS)
 --need triggers to automatically update vertices and links
-RETURNS VARCHAR AS $func$
+RETURNS BOOLEAN AS $func$
 
 DECLARE
-    sname text;
-    tname text;
+    schema_name text;
+    table_name text;
     namecheck record;
     query text;
     sourcetable text;
@@ -380,6 +207,7 @@ DECLARE
     turnrestricttable text;
     sridinfo record;
     srid int;
+    indexcheck TEXT;
 
 BEGIN
     RAISE NOTICE 'PROCESSING:';
@@ -387,38 +215,40 @@ BEGIN
     --check table and schema
     --need to redo without reliance on pgrouting
     BEGIN
-        RAISE DEBUG 'Checking % exists',input_table;
-        execute 'SELECT tdgTableDetails('||input_table||')' INTO namecheck;
-        sname=namecheck.sname;
-        tname=namecheck.tname;
-        IF sname IS NULL OR tname IS NULL THEN
+        RAISE NOTICE 'Checking % exists',input_table;
+        EXECUTE '   SELECT  schema_name,
+                            table_name
+                    FROM    tdgTableDetails('||quote_literal(input_table)||') AS (schema_name TEXT, table_name TEXT)' INTO namecheck;
+        schema_name=namecheck.schema_name;
+        table_name=namecheck.table_name;
+        IF schema_name IS NULL OR table_name IS NULL THEN
     	RAISE NOTICE '-------> % not found',input_table;
-            RETURN 'FAIL';
+            RETURN 'f';
         ELSE
-    	RAISE DEBUG '  -----> OK';
+    	RAISE NOTICE '  -----> OK';
         END IF;
 
-        sourcetable = sname || '.' || tname;
-        verttable = sname || '.' || tname || '_net_vert';
-        linktable = sname || '.' || tname || '_net_link';
-        turnrestricttable = sname || '.' || tname || '_turn_restriction';
+        sourcetable = schema_name || '.' || table_name;
+        verttable = schema_name || '.' || table_name || '_net_vert';
+        linktable = schema_name || '.' || table_name || '_net_link';
+        turnrestricttable = schema_name || '.' || table_name || '_turn_restriction';
     END;
 
     --snap geom to grid to nearest 2 ft
     BEGIN
-        RAISE DEBUG 'snapping road geometries';
+        RAISE NOTICE 'snapping road geometries';
         EXECUTE format('
             UPDATE  %s
             SET     geom = ST_SnapToGrid(geom,2);
             ',  sourcetable);
     END;
 
-    --check for from/to columns
+    --check for from/to/cost columns
     BEGIN
-        RAISE DEBUG 'checking for source/target columns';
+        RAISE NOTICE 'checking for source/target columns';
         IF EXISTS (
             SELECT 1 FROM pg_attribute
-            WHERE  attrelid = tname::regclass
+            WHERE  attrelid = table_name::regclass
             AND    attname = 'source'
             AND    NOT attisdropped)
         THEN
@@ -432,7 +262,7 @@ BEGIN
         END IF;
         IF EXISTS (
             SELECT 1 FROM pg_attribute
-            WHERE  attrelid = tname::regclass
+            WHERE  attrelid = table_name::regclass
             AND    attname = 'target'
             AND    NOT attisdropped)
         THEN
@@ -444,30 +274,32 @@ BEGIN
                 ALTER TABLE %s ADD COLUMN target INT;
                 ',  sourcetable);
         END IF;
+        IF NOT EXISTS (
+            SELECT 1 FROM pg_attribute
+            WHERE  attrelid = table_name::regclass
+            AND    attname = 'cost'
+            AND    NOT attisdropped)
+        THEN
+            EXECUTE format('
+                ALTER TABLE %s ADD COLUMN cost INT;
+                ',  sourcetable);
+        END IF;
     END;
 
     --get srid of the geom
     BEGIN
-        RAISE DEBUG 'Checking the SRID of the geometry';
-        query= '  SELECT ST_SRID(geom) as srid
-                FROM ' || pgr_quote_ident(input_table) || '
-                WHERE geom IS NOT NULL LIMIT 1';
-        EXECUTE QUERY INTO sridinfo;
+        EXECUTE format('SELECT tdgGetSRID(to_regclass(%L),%s)',input_table,quote_literal('geom')) INTO srid;
 
-        IF sridinfo IS NULL OR sridinfo.srid IS NULL THEN
-            RAISE NOTICE 'ERROR: Can not determine the srid of the geometry in table %', input_table;
-            RETURN 'FAIL';
+        IF srid IS NULL THEN
+            RAISE NOTICE 'ERROR: Can not determine the srid of the geometry in table %', t_name;
+            RETURN 'f';
         END IF;
-        srid := sridinfo.srid;
-        raise DEBUG '  -----> SRID found %',srid;
-        EXCEPTION WHEN OTHERS THEN
-            RAISE NOTICE 'ERROR: Can not determine the srid of the geometry "%" in table %', the_geom,tabname;
-            RETURN 'FAIL';
+        RAISE NOTICE '  -----> SRID found %',srid;
     END;
 
     --drop old tables
     BEGIN
-        RAISE DEBUG 'dropping tables';
+        RAISE NOTICE 'dropping tables';
         EXECUTE format('
             DROP TABLE IF EXISTS %s;
             DROP TABLE IF EXISTS %s;
@@ -479,7 +311,7 @@ BEGIN
 
     --create new tables
     BEGIN
-        raise DEBUG 'creating new tables';
+        RAISE NOTICE 'creating new tables';
         EXECUTE format('
             CREATE TABLE %s (   id serial PRIMARY KEY,
                                 node_id TEXT,
@@ -509,25 +341,29 @@ BEGIN
 
     --indexes
     BEGIN
-        RAISE DEBUG 'creating indexes';
+        RAISE NOTICE 'creating indexes';
         EXECUTE format('
             CREATE INDEX %s ON %s USING gist (geom);
             CREATE INDEX %s ON %s (road_id);
             CREATE INDEX %s ON %s (direction);
-            CREATE INDEX %s ON %s (source,target);
-            ',  'sidx_' || tname || 'vert_geom',
+            ',  'sidx_' || table_name || 'vert_geom',
                 verttable,
-                'idx_' || tname || '_link_road_id',
+                'idx_' || table_name || '_link_road_id',
                 linktable,
-                'idx_' || tname || '_link_direction',
-                linktable,
-                'idx_' || tname || '_srctrgt',
-                sourcetable);
+                'idx_' || table_name || '_link_direction',
+                linktable);
+        EXECUTE format('SELECT to_regclass(%L)', quote_literal(schema_name||'.idx_'||table_name||'_srctrgt')) INTO indexcheck;
+        IF indexcheck IS NOT NULL THEN
+            EXECUTE format('
+                CREATE INDEX %s ON %s (source,target);
+                ',  'idx_' || table_name || '_srctrgt',
+                    sourcetable);
+        END IF;
     END;
 
     --insert points into vertices table
     BEGIN
-        RAISE DEBUG 'adding points to vertices table';
+        RAISE NOTICE 'adding points to vertices table';
         EXECUTE format('
             CREATE TEMP TABLE v (i INT, geom geometry(point,%L)) ON COMMIT DROP;
             INSERT INTO v (i, geom) SELECT id, ST_StartPoint(geom) FROM %s ORDER BY id ASC;
@@ -547,7 +383,7 @@ BEGIN
 
     --get source/target info
     BEGIN
-        RAISE DEBUG 'getting source/target info';
+        RAISE NOTICE 'getting source/target info';
         EXECUTE format('
             UPDATE  %s
             SET     source = vf.id,
@@ -559,13 +395,13 @@ BEGIN
             ',  sourcetable,
                 verttable,
                 verttable,
-                tname,
-                tname);
+                table_name,
+                table_name);
     END;
 
     --populate links table
     BEGIN
-        RAISE DEBUG 'adding links';
+        RAISE NOTICE 'adding links';
         EXECUTE format('
             CREATE TEMP TABLE lengths ( id SERIAL PRIMARY KEY,
                                         len FLOAT,
@@ -714,8 +550,181 @@ BEGIN
                 'tf',
                 'ft');
     END;
-RETURN 'success';
+RETURN 't';
 END $func$ LANGUAGE plpgsql;
+CREATE OR REPLACE FUNCTION tdgStandardizeRoadLayer( input_table REGCLASS,
+                                                    output_table TEXT,
+                                                    id_field TEXT,
+                                                    name_field TEXT,
+                                                    adt_field TEXT,
+                                                    speed_field TEXT,
+                                                    func_field TEXT,
+                                                    oneway_field TEXT,
+                                                    overwrite BOOLEAN,
+                                                    delete_source BOOLEAN)
+RETURNS BOOLEAN AS $func$
+
+DECLARE
+    schemaname TEXT;
+    outtabname TEXT;
+    query TEXT;
+    srid INT;
+
+BEGIN
+    raise notice 'PROCESSING:';
+
+    --get schema
+    BEGIN
+        schemaname = 'tdg';
+        outtabname = schemaname||'.'||output_table;
+    END;
+
+    --get srid of the geom
+    BEGIN
+        EXECUTE format('SELECT tdgGetSRID(to_regclass(%L),%s)',input_table,quote_literal('geom')) INTO srid;
+
+        IF srid IS NULL THEN
+            RAISE NOTICE 'ERROR: Can not determine the srid of the geometry in table %', t_name;
+            RETURN 'f';
+        END IF;
+        raise DEBUG '  -----> SRID found %',srid;
+    END;
+
+    --drop new table if exists
+    BEGIN
+        IF overwrite THEN
+            RAISE NOTICE 'DROPPING TABLE %', output_table;
+            EXECUTE format('DROP TABLE IF EXISTS %s',output_table);
+        END IF;
+    END;
+
+    --create new table
+    BEGIN
+        EXECUTE format('
+            CREATE TABLE %s (   id SERIAL PRIMARY KEY,
+                                geom geometry(linestring,%L),
+                                road_name TEXT,
+                                source_id TEXT,
+                                functional_class TEXT,
+                                one_way VARCHAR(2),
+                                speed_limit INT,
+                                adt INT,
+                                ft_seg_lanes_thru INT,
+                                ft_seg_lanes_bike_wd_ft INT,
+                                ft_seg_lanes_park_wd_ft INT,
+                                ft_seg_stress_override INT,
+                                ft_seg_stress INT,
+                                ft_int_lanes_thru INT,
+                                ft_int_lanes_lt INT,
+                                ft_int_lanes_rt_len_ft INT,
+                                ft_int_lanes_rt_radius_speed_mph INT,
+                                ft_int_lanes_bike_wd_ft INT,
+                                ft_int_lanes_bike_straight INT,
+                                ft_int_stress_override INT,
+                                ft_int_stress INT,
+                                ft_cross_median_wd_ft INT,
+                                ft_cross_signal INT,
+                                ft_cross_speed_limit INT,
+                                ft_cross_lanes INT,
+                                ft_cross_stress_override INT,
+                                ft_cross_stress INT,
+                                tf_seg_lanes_thru INT,
+                                tf_seg_lanes_bike_wd_ft INT,
+                                tf_seg_lanes_park_wd_ft INT,
+                                tf_seg_stress_override INT,
+                                tf_seg_stress INT,
+                                tf_int_lanes_thru INT,
+                                tf_int_lanes_lt INT,
+                                tf_int_lanes_rt_len_ft INT,
+                                tf_int_lanes_rt_radius_speed_mph INT,
+                                tf_int_lanes_bike_wd_ft INT,
+                                tf_int_lanes_bike_straight INT,
+                                tf_int_stress_override INT,
+                                tf_int_stress INT,
+                                tf_cross_median_wd_ft INT,
+                                tf_cross_signal INT,
+                                tf_cross_speed_limit INT,
+                                tf_cross_lanes INT,
+                                tf_cross_stress_override INT,
+                                tf_cross_stress INT,
+                                source INT,
+                                target INT,
+                                cost INT,
+                                reverse_cost INT)
+            ',  outtabname,
+                srid);
+    END;
+
+    --copy features over
+    BEGIN
+        query := '';
+        query := '   INSERT INTO ' || outtabname || ' (geom';
+        IF name_field IS NOT NULL THEN
+            query := query || ',road_name';
+            END IF;
+        IF id_field IS NOT NULL THEN
+            query := query || ',source_id';
+            END IF;
+        IF func_field IS NOT NULL THEN
+            query := query || ',functional_class';
+            END IF;
+        IF oneway_field IS NOT NULL THEN
+            query := query || ',one_way';
+            END IF;
+        IF speed_field IS NOT NULL THEN
+            query := query || ',speed_limit';
+            END IF;
+        IF adt_field IS NOT NULL THEN
+            query := query || ',adt';
+            END IF;
+        query := query || ') SELECT ST_SnapToGrid(r.geom,2)';
+        IF name_field IS NOT NULL THEN
+            query := query || ',' || name_field;
+            END IF;
+        IF id_field IS NOT NULL THEN
+            query := query || ',' || id_field;
+            END IF;
+        IF func_field IS NOT NULL THEN
+            query := query || ',' || func_field;
+            END IF;
+        IF oneway_field IS NOT NULL THEN
+            query := query || ',' || oneway_field;
+            END IF;
+        IF speed_field IS NOT NULL THEN
+            query := query || ',' || speed_field;
+            END IF;
+        IF adt_field IS NOT NULL THEN
+            query := query || ',' || adt_field;
+            END IF;
+        query := query || ' FROM ' ||input_table::TEXT|| ' r';
+
+        EXECUTE query;
+    END;
+
+    RETURN 't';
+END $func$ LANGUAGE plpgsql;
+CREATE OR REPLACE FUNCTION tdgGetSRID(input_table REGCLASS,geom_name TEXT)
+RETURNS INT AS $func$
+
+DECLARE
+    geomdetails RECORD;
+
+BEGIN
+    EXECUTE format ('
+        SELECT  ST_SRID(%s) AS srid
+        FROM    %s
+        WHERE   %s IS NOT NULL LIMIT 1
+        ',  geom_name,
+            input_table,
+            geom_name) INTO geomdetails;
+
+    RETURN geomdetails.srid;
+END $func$ LANGUAGE plpgsql;
+CREATE OR REPLACE FUNCTION tdgCalculateStress(anyelement)
+--calculate stress score
+RETURNS INT
+LANGUAGE SQL AS
+'SELECT 1';
 CREATE OR REPLACE FUNCTION tdgTableDetails(input_table REGCLASS)
 RETURNS RECORD AS $func$
 
@@ -724,8 +733,8 @@ DECLARE
 
 BEGIN
     EXECUTE format ('
-        SELECT  nspname AS schema_name,
-                relname AS table_name
+        SELECT  nspname::TEXT AS schema_name,
+                relname::TEXT AS table_name
         FROM    pg_namespace n JOIN pg_class c ON n.oid = c.relnamespace
         WHERE   c.oid = %L::regclass
         ',  input_table) INTO tabledetails;

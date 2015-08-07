@@ -1,14 +1,14 @@
-CREATE OR REPLACE FUNCTION StandardizeRoadLayer(input_table REGCLASS,
-                                                output_table TEXT,
-                                                id_field TEXT,
-                                                name_field TEXT,
-                                                adt_field TEXT,
-                                                speed_field TEXT,
-                                                func_field TEXT,
-                                                oneway_field TEXT,
-                                                overwrite BOOLEAN,
-                                                delete_source BOOLEAN)
-RETURNS VARCHAR AS $func$
+CREATE OR REPLACE FUNCTION tdgStandardizeRoadLayer( input_table REGCLASS,
+                                                    output_table TEXT,
+                                                    id_field TEXT,
+                                                    name_field TEXT,
+                                                    adt_field TEXT,
+                                                    speed_field TEXT,
+                                                    func_field TEXT,
+                                                    oneway_field TEXT,
+                                                    overwrite BOOLEAN,
+                                                    delete_source BOOLEAN)
+RETURNS BOOLEAN AS $func$
 
 DECLARE
     schemaname TEXT;
@@ -31,7 +31,7 @@ BEGIN
 
         IF srid IS NULL THEN
             RAISE NOTICE 'ERROR: Can not determine the srid of the geometry in table %', t_name;
-            RETURN 'FAIL';
+            RETURN 'f';
         END IF;
         raise DEBUG '  -----> SRID found %',srid;
     END;
@@ -147,5 +147,5 @@ BEGIN
         EXECUTE query;
     END;
 
-    RETURN 'success';
+    RETURN 't';
 END $func$ LANGUAGE plpgsql;

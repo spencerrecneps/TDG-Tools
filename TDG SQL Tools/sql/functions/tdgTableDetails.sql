@@ -6,8 +6,8 @@ DECLARE
 
 BEGIN
     EXECUTE format ('
-        SELECT  nspname AS schema_name,
-                relname AS table_name
+        SELECT  nspname::TEXT AS schema_name,
+                relname::TEXT AS table_name
         FROM    pg_namespace n JOIN pg_class c ON n.oid = c.relnamespace
         WHERE   c.oid = %L::regclass
         ',  input_table) INTO tabledetails;
