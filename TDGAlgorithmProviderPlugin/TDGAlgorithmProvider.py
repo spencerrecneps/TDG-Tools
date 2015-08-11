@@ -25,6 +25,8 @@ __copyright__ = '(C) 2015, Spencer Gardner'
 
 __revision__ = '$Format:%H$'
 
+import os
+from PyQt4.QtGui import QIcon
 from processing.core.AlgorithmProvider import AlgorithmProvider
 from processing.core.ProcessingConfig import Setting, ProcessingConfig
 
@@ -34,6 +36,7 @@ from ImportRoadLayer import ImportRoadLayer
 from StandardizeRoadLayer import StandardizeRoadLayer
 from MakeRoadNetwork import MakeRoadNetwork
 
+pluginPath = os.path.normpath(os.path.dirname(__file__))
 
 class TDGAlgorithmProvider(AlgorithmProvider):
 
@@ -66,7 +69,7 @@ class TDGAlgorithmProvider(AlgorithmProvider):
     def getIcon(self):
         """We return the default icon.
         """
-        return AlgorithmProvider.getIcon(self)
+        return QIcon(os.path.join(pluginPath, 'icon.png'))
 
     def _loadAlgorithms(self):
         self.algs = self.alglist
