@@ -565,7 +565,9 @@ CREATE OR REPLACE FUNCTION tdgStandardizeRoadLayer( input_table REGCLASS,
 RETURNS BOOLEAN AS $func$
 
 DECLARE
+    namecheck record;
     schemaname TEXT;
+    tabname TEXT;
     outtabname TEXT;
     query TEXT;
     srid INT;
@@ -575,13 +577,25 @@ BEGIN
 
     --get schema
     BEGIN
-        schemaname = 'tdg';
+        RAISE NOTICE 'Checking % exists',input_table;
+        EXECUTE '   SELECT  schema_name,
+                            table_name
+                    FROM    tdgTableDetails('||quote_literal(input_table)||') AS (schema_name TEXT, table_name TEXT)' INTO namecheck;
+        schemaname=namecheck.schema_name;
+        tabname=namecheck.table_name;
+        IF schemaname IS NULL OR tabname IS NULL THEN
+    	RAISE NOTICE '-------> % not found',input_table;
+            RETURN 'f';
+        ELSE
+    	RAISE NOTICE '  -----> OK';
+        END IF;
+
         outtabname = schemaname||'.'||output_table;
     END;
 
     --get srid of the geom
     BEGIN
-        EXECUTE format('SELECT tdgGetSRID(to_regclass(%L),%s)',input_table,quote_literal('geom')) INTO srid;
+        EXECUTE format('SELECT tdgGetSRID(to_regclass(%L),%s)',tabname,quote_literal('geom')) INTO srid;
 
         IF srid IS NULL THEN
             RAISE NOTICE 'ERROR: Can not determine the srid of the geometry in table %', t_name;
@@ -604,11 +618,13 @@ BEGIN
             CREATE TABLE %s (   id SERIAL PRIMARY KEY,
                                 geom geometry(linestring,%L),
                                 road_name TEXT,
+                                source_data TEXT,
                                 source_id TEXT,
                                 functional_class TEXT,
                                 one_way VARCHAR(2),
                                 speed_limit INT,
                                 adt INT,
+                                z_value INT,
                                 ft_seg_lanes_thru INT,
                                 ft_seg_lanes_bike_wd_ft INT,
                                 ft_seg_lanes_park_wd_ft INT,
@@ -659,6 +675,7 @@ BEGIN
     BEGIN
         query := '';
         query := '   INSERT INTO ' || outtabname || ' (geom';
+        query := query || ',source_data';
         IF name_field IS NOT NULL THEN
             query := query || ',road_name';
             END IF;
@@ -678,6 +695,7 @@ BEGIN
             query := query || ',adt';
             END IF;
         query := query || ') SELECT ST_SnapToGrid(r.geom,2)';
+        query := query || ',' || quote_literal(tabname);
         IF name_field IS NOT NULL THEN
             query := query || ',' || name_field;
             END IF;
@@ -696,11 +714,29 @@ BEGIN
         IF adt_field IS NOT NULL THEN
             query := query || ',' || adt_field;
             END IF;
-        query := query || ' FROM ' ||input_table::TEXT|| ' r';
+        query := query || ' FROM ' ||tabname|| ' r';
 
         EXECUTE query;
     END;
 
+    --indexes
+    BEGIN
+        EXECUTE format('
+            CREATE INDEX sidx_%s_geom ON %s USING GIST(geom);
+            CREATE INDEX idx_%s_oneway ON %s (one_way);
+            CREATE INDEX idx_%s_zval ON %s (z_value);
+            CREATE INDEX idx_%s_srctrgt ON %s (source,target);
+            ',  output_table,
+                outtabname,
+                output_table,
+                outtabname,
+                output_table,
+                outtabname,
+                output_table,
+                outtabname);
+    END;
+
+    EXECUTE format('ANALYZE %s;', output_table);
     RETURN 't';
 END $func$ LANGUAGE plpgsql;
 CREATE OR REPLACE FUNCTION tdgGetSRID(input_table REGCLASS,geom_name TEXT)
