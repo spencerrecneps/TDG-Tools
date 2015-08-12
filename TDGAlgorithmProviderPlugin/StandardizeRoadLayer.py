@@ -58,6 +58,8 @@ class StandardizeRoadLayer(GeoAlgorithm):
     NAME_FIELD = 'NAME_FIELD'
     ADT_FIELD = 'ADT_FIELD'
     SPEED_FIELD = 'SPEED_FIELD'
+    FUNC_FIELD = 'FUNC_FIELD'
+    ONEWAY_FIELD = 'ONEWAY_FIELD'
     OVERWRITE = 'OVERWRITE'
     DELETE_SOURCE = 'DELETE_SOURCE'
 
@@ -78,32 +80,42 @@ class StandardizeRoadLayer(GeoAlgorithm):
         self.addParameter(ParameterString(self.TABLE_NAME,
             self.tr('Name of table to be created'), optional=False))
 
-        # 1 - Input roads layer. Must be line type
+        # Input roads layer. Must be line type
         # It is a mandatory (not optional) one, hence the False argument
         self.addParameter(ParameterVector(self.ROADS_LAYER,
             self.tr('Roads layer'), [ParameterVector.VECTOR_TYPE_LINE], optional=False))
 
-        # 2 - Source ID field in the roads data
+        # Source ID field in the roads data
         # Optional field
         self.addParameter(ParameterTableField(self.ID_FIELD,
             self.tr('Original ID field of the road layer'), optional=True))
 
-        # 3 - Name field in the roads data
+        # Name field in the roads data
         # Optional field
         self.addParameter(ParameterTableField(self.NAME_FIELD,
             self.tr('Name field of the road layer'), optional=True))
 
-        # 4 - ADT field in the roads data
+        # ADT field in the roads data
         # Optional field
         self.addParameter(ParameterTableField(self.ADT_FIELD,
             self.tr('ADT field of the road layer'), optional=True))
 
-        # 5 - Speed limit field in the roads data
+        # Speed limit field in the roads data
         # Optional field
         self.addParameter(ParameterTableField(self.SPEED_FIELD,
             self.tr('Speed limit field of the road layer'), optional=True))
 
-        # 6 - Overwrite existing table?
+        # Function class field in the roads data
+        # Optional field
+        self.addParameter(ParameterTableField(self.FUNC_FIELD,
+            self.tr('Functional class field of the road layer'), optional=True))
+
+        # One way field in the roads data
+        # Optional field
+        self.addParameter(ParameterTableField(self.ONEWAY_FIELD,
+            self.tr('One way field of the road layer'), optional=True))
+
+        # Overwrite existing table?
         self.addParameter(ParameterBoolean(self.OVERWRITE,
             self.tr('Overwrite'), default=True))
 
@@ -119,6 +131,8 @@ class StandardizeRoadLayer(GeoAlgorithm):
         fieldName = self.getParameterValue(self.NAME_FIELD)
         fieldADT = self.getParameterValue(self.ADT_FIELD)
         fieldSpeed = self.getParameterValue(self.SPEED_FIELD)
+        fieldFunc = self.getParameterValue(self.FUNC_FIELD)
+        fieldOneway = self.getParameterValue(self.ONEWAY_FIELD)
         overwrite = self.getParameterValue(self.OVERWRITE)
         delSource = self.getParameterValue(self.DELETE_SOURCE)
 
@@ -170,8 +184,14 @@ class StandardizeRoadLayer(GeoAlgorithm):
             sql = sql + 'NULL,'
         else:
             sql = sql + "'" + fieldSpeed + "',"
-        sql = sql + 'NULL,'  #func class
-        sql = sql + 'NULL,'  #oneway
+        if fieldFunc is None:
+            sql = sql + 'NULL,'
+        else:
+            sql = sql + "'" + fieldFunc + "',"
+        if fieldOneway is None:
+            sql = sql + 'NULL,'
+        else:
+            sql = sql + "'" + fieldOneway + "',"
         if overwrite:
             sql = sql + "'t',"
         else:
@@ -183,6 +203,11 @@ class StandardizeRoadLayer(GeoAlgorithm):
 
         processing.runalg("qgis:postgisexecutesql",database,
             sql)
+
+        if delSource:
+            delSql = 'DROP TABLE ' + roadsDb.getTable()
+            processing.runalg("qgis:postgisexecutesql",database,
+                delSql)
 """
         # set up the new table's uri and get new object
         uri = QgsDataSourceURI()
