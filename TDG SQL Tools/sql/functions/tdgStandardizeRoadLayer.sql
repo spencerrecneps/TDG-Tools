@@ -30,10 +30,10 @@ BEGIN
         schemaname=namecheck.schema_name;
         tabname=namecheck.table_name;
         IF schemaname IS NULL OR tabname IS NULL THEN
-    	RAISE NOTICE '-------> % not found',input_table;
+            RAISE NOTICE '-------> % not found',input_table;
             RETURN 'f';
         ELSE
-    	RAISE NOTICE '  -----> OK';
+            RAISE NOTICE '  -----> OK';
         END IF;
 
         outtabname = schemaname||'.'||output_table;
@@ -64,6 +64,8 @@ BEGIN
             CREATE TABLE %s (   id SERIAL PRIMARY KEY,
                                 geom geometry(linestring,%L),
                                 road_name TEXT,
+                                road_from TEXT,
+                                road_to TEXT,
                                 source_data TEXT,
                                 source_id TEXT,
                                 functional_class TEXT,
