@@ -35,6 +35,7 @@ from processing.script.ScriptUtils import ScriptUtils
 from ImportRoadLayer import ImportRoadLayer
 from StandardizeRoadLayer import StandardizeRoadLayer
 from MakeRoadNetwork import MakeRoadNetwork
+from CalculateStress import CalculateStress
 
 pluginPath = os.path.normpath(os.path.dirname(__file__))
 
@@ -50,7 +51,8 @@ class TDGAlgorithmProvider(AlgorithmProvider):
         self.alglist = [
             ImportRoadLayer(),
             StandardizeRoadLayer(),
-            MakeRoadNetwork()]
+            MakeRoadNetwork(),
+            CalculateStress()]
         for alg in self.alglist:
             alg.provider = self
 

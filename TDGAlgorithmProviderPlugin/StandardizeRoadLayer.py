@@ -203,11 +203,17 @@ class StandardizeRoadLayer(GeoAlgorithm):
 
         processing.runalg("qgis:postgisexecutesql",database,
             sql)
+"""
+        sql = 'select tdgGenerateCrossStreetData('
+        sql = sql + "'" + tableName + "');"
+        processing.runalg("qgis:postgisexecutesql",database,
+            sql)
 
         if delSource:
             delSql = 'DROP TABLE ' + roadsDb.getTable()
             processing.runalg("qgis:postgisexecutesql",database,
                 delSql)
+        """
 """
         # set up the new table's uri and get new object
         uri = QgsDataSourceURI()
