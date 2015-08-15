@@ -88,32 +88,44 @@ class StandardizeRoadLayer(GeoAlgorithm):
         # Source ID field in the roads data
         # Optional field
         self.addParameter(ParameterTableField(self.ID_FIELD,
-            self.tr('Original ID field of the road layer'), optional=True))
+            self.tr('Original ID field of the road layer'),
+            parent=self.ROADS_LAYER,
+            optional=True))
 
         # Name field in the roads data
         # Optional field
         self.addParameter(ParameterTableField(self.NAME_FIELD,
-            self.tr('Name field of the road layer'), optional=True))
+            self.tr('Name field of the road layer'),
+            parent=self.ROADS_LAYER,
+            optional=True))
 
         # ADT field in the roads data
         # Optional field
         self.addParameter(ParameterTableField(self.ADT_FIELD,
-            self.tr('ADT field of the road layer'), optional=True))
+            self.tr('ADT field of the road layer'),
+            parent=self.ROADS_LAYER,
+            optional=True))
 
         # Speed limit field in the roads data
         # Optional field
         self.addParameter(ParameterTableField(self.SPEED_FIELD,
-            self.tr('Speed limit field of the road layer'), optional=True))
+            self.tr('Speed limit field of the road layer'),
+            parent=self.ROADS_LAYER,
+            optional=True))
 
         # Function class field in the roads data
         # Optional field
         self.addParameter(ParameterTableField(self.FUNC_FIELD,
-            self.tr('Functional class field of the road layer'), optional=True))
+            self.tr('Functional class field of the road layer'),
+            parent=self.ROADS_LAYER,
+            optional=True))
 
         # One way field in the roads data
         # Optional field
         self.addParameter(ParameterTableField(self.ONEWAY_FIELD,
-            self.tr('One way field of the road layer'), optional=True))
+            self.tr('One way field of the road layer'),
+            parent=self.ROADS_LAYER,
+            optional=True))
 
         # Overwrite existing table?
         self.addParameter(ParameterBoolean(self.OVERWRITE,
