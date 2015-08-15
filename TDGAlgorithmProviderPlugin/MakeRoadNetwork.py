@@ -32,12 +32,9 @@ import processing
 from processing.core.GeoAlgorithm import GeoAlgorithm
 from processing.core.GeoAlgorithmExecutionException import GeoAlgorithmExecutionException
 from processing.core.parameters import ParameterVector
-from processing.core.parameters import ParameterString
-from processing.core.parameters import ParameterTableField
 from processing.core.parameters import ParameterBoolean
-from processing.core.parameters import ParameterSelection
 
-from processing.tools import dataobjects, vector
+from processing.tools import dataobjects
 from processing.algs.qgis import postgis_utils
 from dbutils import LayerDbInfo
 
