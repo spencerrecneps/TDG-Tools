@@ -113,8 +113,8 @@ BEGIN
                                 tf_cross_stress INT,
                                 source INT,
                                 target INT,
-                                cost INT,
-                                reverse_cost INT)
+                                ft_cost INT,
+                                tf_cost INT)
             ',  outtabname,
                 srid);
     END;

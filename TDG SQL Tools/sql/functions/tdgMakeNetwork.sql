@@ -83,11 +83,21 @@ BEGIN
         IF NOT EXISTS (
             SELECT 1 FROM pg_attribute
             WHERE  attrelid = table_name::regclass
-            AND    attname = 'cost'
+            AND    attname = 'ft_cost'
             AND    NOT attisdropped)
         THEN
             EXECUTE format('
-                ALTER TABLE %s ADD COLUMN cost INT;
+                ALTER TABLE %s ADD COLUMN ft_cost INT;
+                ',  sourcetable);
+        END IF;
+        IF NOT EXISTS (
+            SELECT 1 FROM pg_attribute
+            WHERE  attrelid = table_name::regclass
+            AND    attname = 'tf_cost'
+            AND    NOT attisdropped)
+        THEN
+            EXECUTE format('
+                ALTER TABLE %s ADD COLUMN tf_cost INT;
                 ',  sourcetable);
         END IF;
     END;
@@ -119,10 +129,9 @@ BEGIN
     BEGIN
         RAISE NOTICE 'creating new tables';
         EXECUTE format('
-            CREATE TABLE %s (   id serial PRIMARY KEY,
-                                node_id TEXT,
+            CREATE TABLE %s (   node_id serial PRIMARY KEY,
                                 node_order INT,
-                                cost INT,
+                                node_cost INT,
                                 geom geometry(point,%L));
             ',  verttable,
                 srid);
@@ -137,9 +146,11 @@ BEGIN
         EXECUTE format('
             CREATE TABLE %s (   id serial primary key,
                                 road_id INT,
+                                source_node INT,
+                                target_node INT,
                                 direction VARCHAR(2),
-                                cost INT,
-                                stress INT,
+                                link_cost INT,
+                                link_stress INT,
                                 geom geometry(linestring,%L));
             ',  linktable,
                 srid);
@@ -152,11 +163,14 @@ BEGIN
             CREATE INDEX %s ON %s USING gist (geom);
             CREATE INDEX %s ON %s (road_id);
             CREATE INDEX %s ON %s (direction);
+            CREATE INDEX %s ON %s (source_node,target_node);
             ',  'sidx_' || table_name || 'vert_geom',
                 verttable,
                 'idx_' || table_name || '_link_road_id',
                 linktable,
                 'idx_' || table_name || '_link_direction',
+                linktable,
+                'idx_' || table_name || '_link_src_trgt',
                 linktable);
         EXECUTE format('SELECT to_regclass(%L)', quote_literal(schema_name||'.idx_'||table_name||'_srctrgt')) INTO indexcheck;
         IF indexcheck IS NOT NULL THEN
@@ -174,17 +188,15 @@ BEGIN
             CREATE TEMP TABLE v (i INT, geom geometry(point,%L)) ON COMMIT DROP;
             INSERT INTO v (i, geom) SELECT id, ST_StartPoint(geom) FROM %s ORDER BY id ASC;
             INSERT INTO v (i, geom) SELECT id, ST_EndPoint(geom) FROM %s ORDER BY id ASC;
-            INSERT INTO %s (node_id, node_order, geom)
-            SELECT      string_agg(i::TEXT, %L),
-                        COUNT(i),
+            INSERT INTO %s (node_order, geom)
+            SELECT      COUNT(i),
                         geom
             FROM        v
             GROUP BY    geom;
             ',  srid,
                 sourcetable,
                 sourcetable,
-                verttable,
-                ' | ');
+                verttable);
     END;
 
     --get source/target info
@@ -192,8 +204,8 @@ BEGIN
         RAISE NOTICE 'getting source/target info';
         EXECUTE format('
             UPDATE  %s
-            SET     source = vf.id,
-                    target = vt.id
+            SET     source = vf.node_id,
+                    target = vt.node_id
             FROM    %s vf,
                     %s vt
             WHERE   ST_StartPoint(%I.geom) = vf.geom
@@ -232,8 +244,8 @@ BEGIN
             FROM    %s s,
                     %s vf,
                     %s vt
-            WHERE   s.source = vf.id
-            AND     s.target = vt.id;
+            WHERE   s.source = vf.node_id
+            AND     s.target = vt.node_id;
             ',  sourcetable,
                 verttable,
                 verttable);
@@ -243,11 +255,17 @@ BEGIN
             INSERT INTO %s (geom,
                             direction,
                             road_id,
-                            cost)
+                            source_node,
+                            target_node,
+                            link_cost,
+                            link_stress)
             SELECT  ST_Makeline(l.f_point,l.t_point),
                     %L,
                     r.id,
-                    r.cost
+                    r.source,
+                    r.target,
+                    r.ft_cost,
+                    GREATEST(r.ft_seg_stress,r.ft_int_stress)
             FROM    %s r,
                     lengths l
             WHERE   r.id=l.id
@@ -262,11 +280,17 @@ BEGIN
             INSERT INTO %s (geom,
                             direction,
                             road_id,
-                            cost)
+                            source_node,
+                            target_node,
+                            link_cost,
+                            link_stress)
             SELECT  ST_Makeline(l.t_point,l.f_point),
                     %L,
                     r.id,
-                    r.cost
+                    r.target,
+                    r.source,
+                    r.tf_cost,
+                    GREATEST(r.tf_seg_stress,r.tf_int_stress)
             FROM    %s r,
                     lengths l
             WHERE   r.id=l.id
