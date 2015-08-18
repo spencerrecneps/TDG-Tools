@@ -371,29 +371,79 @@ BEGIN
 
     RETURN 't';
 END $func$ LANGUAGE plpgsql;
+CREATE OR REPLACE FUNCTION tdgTableCheck (input_table REGCLASS)
+RETURNS BOOLEAN AS $func$
+
+DECLARE
+    namecheck RECORD;
+
+BEGIN
+    RAISE NOTICE 'Checking % exists',input_table;
+    EXECUTE '   SELECT  schema_name,
+                        table_name
+                FROM    tdgTableDetails('||quote_literal(input_table)||') AS (schema_name TEXT, table_name TEXT)' INTO namecheck;
+    IF namecheck.schema_name IS NULL OR namecheck.table_name IS NULL THEN
+        RETURN 'f';
+    END IF;
+
+RETURN 't';
+END $func$ LANGUAGE plpgsql;
 CREATE OR REPLACE FUNCTION tdgMakeRouter (input_table REGCLASS)
 RETURNS BOOLEAN AS $func$
 
 DECLARE
+    namecheck RECORD;
+    schema_name TEXT;
+    table_name TEXT;
     routetable TEXT;
     linktable TEXT;
     verttable TEXT;
 
 BEGIN
-    --vars
-    routetable = input_table || '_net_router';
-    linktable = input_table || '_net_link';
-    verttable = input_table || '_net_vert';
+    BEGIN
+        --make sure the input table exists and get infos
+        RAISE NOTICE 'Checking % exists',input_table;
+        EXECUTE '   SELECT  schema_name,
+                            table_name
+                    FROM    tdgTableDetails('||quote_literal(input_table)||') AS (schema_name TEXT, table_name TEXT)' INTO namecheck;
+        schema_name=namecheck.schema_name;
+        table_name=namecheck.table_name;
+        IF schema_name IS NULL OR table_name IS NULL THEN
+            RAISE NOTICE '-------> % not found',input_table;
+            RETURN 'f';
+        END IF;
 
-    RAISE NOTICE 'Creating routing table %', routetable;
-    EXECUTE format('
-        CREATE TABLE %s (
-            id SERIAL PRIMARY KEY,
-            net_id TEXT,
-            net_cost INT,
-            net_stress INT
-        )
-        ',  routetable);
+        --set table names
+        routetable = schema_name || '.' || table_name || '_net_router';
+        linktable = schema_name || '.' || table_name || '_net_link';
+        verttable = schema_name || '.' || table_name || '_net_vert';
+
+        --check whether link and vert tables exist
+        IF tdgTableCheck(linktable) = 'f' THEN
+            RAISE NOTICE '--------> % not found',linktable;
+            RETURN 'f';
+        END IF;
+        IF tdgTableCheck(verttable) = 'f' THEN
+            RAISE NOTICE '--------> % not found',verttable;
+            RETURN 'f';
+        END IF;
+
+        --create new routing table
+        RAISE NOTICE 'Creating routing table %',routetable;
+        EXECUTE format('DROP TABLE IF EXISTS %s;',routetable);
+        EXECUTE format('
+            CREATE TABLE %s (
+                id SERIAL PRIMARY KEY,
+                net_id TEXT,
+                net_cost INT,
+                net_stress INT
+            )
+            ',  routetable);
+        EXECUTE format('
+            CREATE INDEX %s ON %s (net_id);'
+            ,  'idx_'||table_name||'_router_netid',
+                routetable);
+    END;
 
     RAISE NOTICE 'Inserting data';
     EXECUTE format('
@@ -407,6 +457,20 @@ BEGIN
             linktable);
 
 RETURN 't';
+END $func$ LANGUAGE plpgsql;
+CREATE OR REPLACE FUNCTION tdgColumnCheck (input_table REGCLASS, column_name TEXT)
+RETURNS BOOLEAN AS $func$
+
+BEGIN
+    IF EXISTS (
+        SELECT 1 FROM pg_attribute
+        WHERE  attrelid = input_table
+        AND    attname = column_name
+        AND    NOT attisdropped)
+    THEN
+        RETURN 't';
+    END IF;
+RETURN 'f';
 END $func$ LANGUAGE plpgsql;
 CREATE OR REPLACE FUNCTION tdgMakeNetwork(input_table REGCLASS)
 --need triggers to automatically update vertices and links
@@ -429,7 +493,6 @@ BEGIN
     RAISE NOTICE 'PROCESSING:';
 
     --check table and schema
-    --need to redo without reliance on pgrouting
     BEGIN
         RAISE NOTICE 'Checking % exists',input_table;
         EXECUTE '   SELECT  schema_name,

@@ -19,7 +19,6 @@ BEGIN
     RAISE NOTICE 'PROCESSING:';
 
     --check table and schema
-    --need to redo without reliance on pgrouting
     BEGIN
         RAISE NOTICE 'Checking % exists',input_table;
         EXECUTE '   SELECT  schema_name,
@@ -28,10 +27,10 @@ BEGIN
         schema_name=namecheck.schema_name;
         table_name=namecheck.table_name;
         IF schema_name IS NULL OR table_name IS NULL THEN
-    	RAISE NOTICE '-------> % not found',input_table;
+    	    RAISE NOTICE '-------> % not found',input_table;
             RETURN 'f';
         ELSE
-    	RAISE NOTICE '  -----> OK';
+    	    RAISE NOTICE '  -----> OK';
         END IF;
 
         sourcetable = schema_name || '.' || table_name;
@@ -52,12 +51,7 @@ BEGIN
     --check for from/to/cost columns
     BEGIN
         RAISE NOTICE 'checking for source/target columns';
-        IF EXISTS (
-            SELECT 1 FROM pg_attribute
-            WHERE  attrelid = table_name::regclass
-            AND    attname = 'source'
-            AND    NOT attisdropped)
-        THEN
+        IF tdgColumnCheck(table_name,'source') = 't' THEN
             EXECUTE format('
                 UPDATE %s SET source=NULL;
                 ',  sourcetable);
@@ -66,12 +60,7 @@ BEGIN
                 ALTER TABLE %s ADD COLUMN source INT;
                 ',  sourcetable);
         END IF;
-        IF EXISTS (
-            SELECT 1 FROM pg_attribute
-            WHERE  attrelid = table_name::regclass
-            AND    attname = 'target'
-            AND    NOT attisdropped)
-        THEN
+        IF tdgColumnCheck(table_name,'target') = 't' THEN
             EXECUTE format('
                 UPDATE %s SET target=NULL;
                 ',  sourcetable);
@@ -80,22 +69,20 @@ BEGIN
                 ALTER TABLE %s ADD COLUMN target INT;
                 ',  sourcetable);
         END IF;
-        IF NOT EXISTS (
-            SELECT 1 FROM pg_attribute
-            WHERE  attrelid = table_name::regclass
-            AND    attname = 'ft_cost'
-            AND    NOT attisdropped)
-        THEN
+        IF tdgColumnCheck(table_name,'ft_cost') = 't' THEN
+            EXECUTE format('
+                UPDATE %s SET ft_cost=NULL;
+                ',  sourcetable);
+        ELSE
             EXECUTE format('
                 ALTER TABLE %s ADD COLUMN ft_cost INT;
                 ',  sourcetable);
         END IF;
-        IF NOT EXISTS (
-            SELECT 1 FROM pg_attribute
-            WHERE  attrelid = table_name::regclass
-            AND    attname = 'tf_cost'
-            AND    NOT attisdropped)
-        THEN
+        IF tdgColumnCheck(table_name,'tf_cost') = 't' THEN
+            EXECUTE format('
+                UPDATE %s SET tf_cost=NULL;
+                ',  sourcetable);
+        ELSE
             EXECUTE format('
                 ALTER TABLE %s ADD COLUMN tf_cost INT;
                 ',  sourcetable);
