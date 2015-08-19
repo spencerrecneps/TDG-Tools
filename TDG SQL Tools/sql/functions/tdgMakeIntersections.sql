@@ -35,8 +35,7 @@ BEGIN
         EXECUTE format('SELECT tdgGetSRID(to_regclass(%L),%s)',input_table,quote_literal('geom')) INTO srid;
 
         IF srid IS NULL THEN
-            RAISE NOTICE 'ERROR: Can not determine the srid of the geometry in table %', t_name;
-            RETURN 'f';
+            RAISE EXCEPTION 'Could not determine SRID of ', input_table;
         END IF;
         RAISE NOTICE '  -----> SRID found %',srid;
     END;

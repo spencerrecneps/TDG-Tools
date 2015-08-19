@@ -601,9 +601,12 @@ BEGIN
         EXECUTE format('
             CREATE TABLE %s (   id serial primary key,
                                 road_id INT,
+                                azimuth INT,
                                 source_node INT,
                                 target_node INT,
+                                intersection_id INT,
                                 direction VARCHAR(2),
+                                movement TEXT,
                                 link_cost INT,
                                 link_stress INT,
                                 geom geometry(linestring,%L));
@@ -639,89 +642,142 @@ BEGIN
         END IF;
     END;
 
-    --insert points into vertices table
+    --create temporary table of all possible vertices table
+    EXECUTE format('
+        CREATE TEMP TABLE v (   id SERIAL PRIMARY KEY,
+                                road_id INT,
+                                vert_id INT,
+                                int_id INT,
+                                loc VARCHAR(1),
+                                int_geom geometry(point,%L),
+                                vert_geom geometry(point,%L))
+        ON COMMIT DROP;
+        ',  srid,
+            srid);
+
+    --insert vertices
     BEGIN
         RAISE NOTICE 'adding points to vertices table';
         EXECUTE format('
-            CREATE TEMP TABLE v (i INT, geom geometry(point,%L)) ON COMMIT DROP;
-            INSERT INTO v (i, geom) SELECT id, ST_StartPoint(geom) FROM %s ORDER BY id ASC;
-            INSERT INTO v (i, geom) SELECT id, ST_EndPoint(geom) FROM %s ORDER BY id ASC;
-            INSERT INTO %s (node_order, geom)
-            SELECT      COUNT(i),
-                        geom
-            FROM        v
-            GROUP BY    geom;
-            ',  srid,
+            INSERT INTO v (road_id, loc, int_geom, vert_geom)
+            SELECT      id,
+                        %L,
+                        ST_StartPoint(geom),
+                        ST_LineInterpolatePoint(s.geom,LEAST(0.5*ST_Length(s.geom)-5,50.0)/ST_Length(s.geom))
+            FROM        %s s
+            ORDER BY    id ASC;
+
+            INSERT INTO v (road_id, loc, int_geom, vert_geom)
+            SELECT      id,
+                        %L,
+                        ST_EndPoint(geom),
+                        ST_LineInterpolatePoint(s.geom,GREATEST(0.5*ST_Length(s.geom)+5,ST_Length(s.geom)-50)/ST_Length(s.geom))
+            FROM        %s s
+            ORDER BY    id ASC;
+
+            INSERT INTO %s (intersection_id, geom)
+            SELECT      intersection.id,
+                        v.vert_geom
+            FROM        v,
+                        %s intersection
+            WHERE       v.int_geom = intersection.geom
+            GROUP BY    intersection.id,
+                        v.vert_geom;
+            ',  'f',
                 sourcetable,
+                't',
                 sourcetable,
-                verttable);
+                verttable,
+                inttable);
     END;
 
-    --get source/target info
+    --join back the vertices to the temporary table
+    EXECUTE format('
+        UPDATE  v
+        SET     vert_id = vx.node_id
+        FROM    %s vx
+        WHERE   v.vert_geom = vx.geom;
+        ',  verttable);
+
+    --join intersections to the temporary table
+    EXECUTE format('
+        UPDATE  v
+        SET     int_id = i.id
+        FROM    %s i
+        WHERE   v.int_geom = i.geom;
+        ',  inttable);
+
+    --set source/target info
     BEGIN
-        RAISE NOTICE 'getting source/target info';
+        RAISE NOTICE 'setting source/target info';
         EXECUTE format('
             UPDATE  %s
-            SET     source = vf.node_id,
-                    target = vt.node_id
-            FROM    %s vf,
-                    %s vt
-            WHERE   ST_StartPoint(%I.geom) = vf.geom
-            AND     ST_EndPoint(%I.geom) = vt.geom
+            SET     source = vf.vert_id,
+                    target = vt.vert_id
+            FROM    v vf,
+                    v vt
+            WHERE   %I.id = vf.road_id AND vf.loc = %L
+            AND     %I.id = vt.road_id AND vt.loc = %L;
             ',  sourcetable,
-                verttable,
-                verttable,
-                table_name,
-                table_name);
+                input_table,
+                'f',
+                input_table,
+                't');
     END;
 
-    --populate links table
+    --populate links tables
     BEGIN
         RAISE NOTICE 'adding links';
         EXECUTE format('
             CREATE TEMP TABLE lengths ( id SERIAL PRIMARY KEY,
                                         len FLOAT,
                                         f_point geometry(point, %L),
-                                        t_point geometry(point, %L))
+                                        t_point geometry(point, %L),
+                                        f_int_id INT,
+                                        t_int_id INT)
             ON COMMIT DROP;
             ',  srid,
                 srid);
 
         EXECUTE format('
-            INSERT INTO lengths (id, len, f_point, t_point)
+            INSERT INTO lengths (id, len, f_point, t_point, f_int_id, t_int_id)
             SELECT  s.id,
                     ST_Length(s.geom) AS len,
-                    CASE    WHEN vf.node_order > 2
-                            THEN ST_LineInterpolatePoint(s.geom,LEAST(0.5*ST_Length(s.geom)-5,50.0)/ST_Length(s.geom))
-                            ELSE ST_StartPoint(s.geom)
+                    CASE    WHEN f_int.legs > 2
+                            THEN vf.vert_geom
+                            ELSE vf.int_geom
                             END AS f_point,
-                    CASE    WHEN vt.node_order > 2
-                            THEN ST_LineInterpolatePoint(s.geom,GREATEST(0.5*ST_Length(s.geom)+5,ST_Length(s.geom)-50)/ST_Length(s.geom))
-                            ELSE ST_EndPoint(s.geom)
-                            END AS t_point
+                    CASE    WHEN t_int.legs > 2
+                            THEN vt.vert_geom
+                            ELSE vt.int_geom
+                            END AS t_point,
+                    vf.int_id,
+                    vt.int_id
             FROM    %s s,
-                    %s vf,
-                    %s vt
-            WHERE   s.source = vf.node_id
-            AND     s.target = vt.node_id;
-            ',  sourcetable,
-                verttable,
-                verttable);
+                    v vf,
+                    %s f_int,
+                    v vt,
+                    %s t_int
+            WHERE   s.id = vf.road_id AND vf.loc = %L
+            AND     vf.int_id = f_int.id
+            AND     s.id = vt.road_id AND vt.loc = %L
+            AND     vt.int_id = t_int.id;
+            ',  input_table,
+                inttable,
+                inttable,
+                'f',
+                't');
 
-        --self segment ft
+        --links - self segment ft
         EXECUTE format('
             INSERT INTO %s (geom,
                             direction,
                             road_id,
-                            source_node,
-                            target_node,
                             link_cost,
                             link_stress)
             SELECT  ST_Makeline(l.f_point,l.t_point),
                     %L,
                     r.id,
-                    r.source,
-                    r.target,
                     r.ft_cost,
                     GREATEST(r.ft_seg_stress,r.ft_int_stress)
             FROM    %s r,
@@ -733,20 +789,16 @@ BEGIN
                 sourcetable,
                 'ft');
 
-        --self segment tf
+        --links - self segment tf
         EXECUTE format('
             INSERT INTO %s (geom,
                             direction,
                             road_id,
-                            source_node,
-                            target_node,
                             link_cost,
                             link_stress)
             SELECT  ST_Makeline(l.t_point,l.f_point),
                     %L,
                     r.id,
-                    r.target,
-                    r.source,
                     r.tf_cost,
                     GREATEST(r.tf_seg_stress,r.tf_int_stress)
             FROM    %s r,
@@ -762,18 +814,10 @@ BEGIN
         EXECUTE format('
             INSERT INTO %s (geom,
                             direction,
-                            road_id,
-                            source_node,
-                            target_node,
-                            link_cost,
-                            link_stress)
+                            intersection_id)
             SELECT  ST_Makeline(fl.t_point,tl.f_point),
                     %L,
-                    NULL,
-                    NULL,
-                    NULL,
-                    NULL,
-                    NULL
+                    fl.t_int_id
             FROM    %s f,
                     %s t,
                     lengths fl,
@@ -795,18 +839,10 @@ BEGIN
         EXECUTE format('
             INSERT INTO %s (geom,
                             direction,
-                            road_id,
-                            source_node,
-                            target_node,
-                            link_cost,
-                            link_stress)
+                            intersection_id)
             SELECT  ST_Makeline(fl.t_point,tl.t_point),
                     %L,
-                    NULL,
-                    NULL,
-                    NULL,
-                    NULL,
-                    NULL
+                    fl.t_int_id
             FROM    %s f,
                     %s t,
                     lengths fl,
@@ -828,18 +864,10 @@ BEGIN
         EXECUTE format('
             INSERT INTO %s (geom,
                             direction,
-                            road_id,
-                            source_node,
-                            target_node,
-                            link_cost,
-                            link_stress)
+                            intersection_id)
             SELECT  ST_Makeline(fl.f_point,tl.t_point),
                     %L,
-                    NULL,
-                    NULL,
-                    NULL,
-                    NULL,
-                    NULL
+                    fl.f_int_id
             FROM    %s f,
                     %s t,
                     lengths fl,
@@ -861,18 +889,10 @@ BEGIN
         EXECUTE format('
             INSERT INTO %s (geom,
                             direction,
-                            road_id,
-                            source_node,
-                            target_node,
-                            link_cost,
-                            link_stress)
+                            intersection_id)
             SELECT  ST_Makeline(fl.f_point,tl.f_point),
                     %L,
-                    NULL,
-                    NULL,
-                    NULL,
-                    NULL,
-                    NULL
+                    fl.f_int_id
             FROM    %s f,
                     %s t,
                     lengths fl,
@@ -891,11 +911,64 @@ BEGIN
                 'ft');
     END;
 
+    --get turn information
+    BEGIN
+        EXECUTE format('
+            UPDATE  %s
+            SET     azimuth = ST_Azimuth(ST_StartPoint(geom),ST_EndPoint(geom));
+            ',  linktable);
+        PERFORM tdgGetTurnInfo(linktable,inttable);
+    END;
+
     BEGIN
         EXECUTE format('ANALYZE %s;', verttable);
         EXECUTE format('ANALYZE %s;', linktable);
         EXECUTE format('ANALYZE %s;', turnrestricttable);
     END;
+RETURN 't';
+END $func$ LANGUAGE plpgsql;
+CREATE OR REPLACE FUNCTION tdgGetTurnInfo ( link_table REGCLASS,
+                                            inttable REGCLASS)
+RETURNS BOOLEAN AS $func$
+
+BEGIN
+    --assign 'straight' to non-intersections
+    EXECUTE format('
+        UPDATE  %s
+        SET     movement = %L
+        FROM    %s ints
+        WHERE   ints.id = intersection_id
+        AND     ints.legs = 2;
+        ',  link_table,
+            'straight',
+            inttable);
+
+    --left turns at 3-legged intersections
+    UPDATE  link_table::REGCLASS
+    SET     movement = 'left'
+    FROM    inttable ints
+    WHERE   ints.id = intersection_id
+    AND     ints.legs = 3;
+
+
+    --right turns at 3-legged intersections
+
+    --straight at 3-legged intersections
+
+    --straight at 4-legged intersections
+
+    --left turns at 4-legged intersections
+
+    --right turns at 4-legged intersections
+
+    --straight at >4-legged intersections
+
+    --left turns at >4-legged intersections
+
+    --right turns at >4-legged intersections
+
+
+
 RETURN 't';
 END $func$ LANGUAGE plpgsql;
 CREATE OR REPLACE FUNCTION tdgStandardizeRoadLayer( input_table REGCLASS,
@@ -1140,8 +1213,7 @@ BEGIN
         EXECUTE format('SELECT tdgGetSRID(to_regclass(%L),%s)',input_table,quote_literal('geom')) INTO srid;
 
         IF srid IS NULL THEN
-            RAISE NOTICE 'ERROR: Can not determine the srid of the geometry in table %', t_name;
-            RETURN 'f';
+            RAISE EXCEPTION 'Could not determine SRID of ', input_table;
         END IF;
         RAISE NOTICE '  -----> SRID found %',srid;
     END;
