@@ -167,6 +167,15 @@ BEGIN
         EXECUTE query;
     END;
 
+    --snap geom to grid to nearest 2 ft
+    BEGIN
+        RAISE NOTICE 'snapping road geometries';
+        EXECUTE format('
+            UPDATE  %s
+            SET     geom = ST_SnapToGrid(geom,2);
+            ',  outtabname);
+    END;
+
     --indexes
     BEGIN
         EXECUTE format('
@@ -184,6 +193,13 @@ BEGIN
                 outtabname);
     END;
 
-    EXECUTE format('ANALYZE %s;', output_table);
+    BEGIN
+        EXECUTE format('ANALYZE %s;', output_table);
+    END;
+
+    BEGIN
+        PERFORM tdgMakeIntersections(outtabname::REGCLASS);
+    END;
+
     RETURN 't';
 END $func$ LANGUAGE plpgsql;

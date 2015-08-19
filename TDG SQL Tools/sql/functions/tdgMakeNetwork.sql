@@ -11,7 +11,7 @@ DECLARE
     verttable text;
     linktable text;
     turnrestricttable text;
-    sridinfo record;
+    inttable text;
     srid int;
     indexcheck TEXT;
 
@@ -37,15 +37,7 @@ BEGIN
         verttable = schema_name || '.' || table_name || '_net_vert';
         linktable = schema_name || '.' || table_name || '_net_link';
         turnrestricttable = schema_name || '.' || table_name || '_turn_restriction';
-    END;
-
-    --snap geom to grid to nearest 2 ft
-    BEGIN
-        RAISE NOTICE 'snapping road geometries';
-        EXECUTE format('
-            UPDATE  %s
-            SET     geom = ST_SnapToGrid(geom,2);
-            ',  sourcetable);
+        inttable = schema_name || '.' || table_name || '_intersections';
     END;
 
     --check for from/to/cost columns
@@ -117,7 +109,7 @@ BEGIN
         RAISE NOTICE 'creating new tables';
         EXECUTE format('
             CREATE TABLE %s (   node_id serial PRIMARY KEY,
-                                node_order INT,
+                                intersection_id INT,
                                 node_cost INT,
                                 geom geometry(point,%L));
             ',  verttable,
@@ -148,10 +140,13 @@ BEGIN
         RAISE NOTICE 'creating indexes';
         EXECUTE format('
             CREATE INDEX %s ON %s USING gist (geom);
+            CREATE INDEX %s ON %s (intersection_id);
             CREATE INDEX %s ON %s (road_id);
             CREATE INDEX %s ON %s (direction);
             CREATE INDEX %s ON %s (source_node,target_node);
             ',  'sidx_' || table_name || 'vert_geom',
+                verttable,
+                'idx_' || table_name || 'vert_intid',
                 verttable,
                 'idx_' || table_name || '_link_road_id',
                 linktable,
@@ -289,8 +284,20 @@ BEGIN
 
         --from end to start
         EXECUTE format('
-            INSERT INTO %s (geom)
-            SELECT  ST_Makeline(fl.t_point,tl.f_point)
+            INSERT INTO %s (geom,
+                            direction,
+                            road_id,
+                            source_node,
+                            target_node,
+                            link_cost,
+                            link_stress)
+            SELECT  ST_Makeline(fl.t_point,tl.f_point),
+                    %L,
+                    NULL,
+                    NULL,
+                    NULL,
+                    NULL,
+                    NULL
             FROM    %s f,
                     %s t,
                     lengths fl,
@@ -302,6 +309,7 @@ BEGIN
             AND     (f.one_way IS NULL OR f.one_way = %L)
             AND     (t.one_way IS NULL OR t.one_way = %L);
             ',  linktable,
+                'ft',
                 sourcetable,
                 sourcetable,
                 'ft',
@@ -309,8 +317,20 @@ BEGIN
 
         --from end to end
         EXECUTE format('
-            INSERT INTO %s (geom)
-            SELECT  ST_Makeline(fl.t_point,tl.t_point)
+            INSERT INTO %s (geom,
+                            direction,
+                            road_id,
+                            source_node,
+                            target_node,
+                            link_cost,
+                            link_stress)
+            SELECT  ST_Makeline(fl.t_point,tl.t_point),
+                    %L,
+                    NULL,
+                    NULL,
+                    NULL,
+                    NULL,
+                    NULL
             FROM    %s f,
                     %s t,
                     lengths fl,
@@ -322,6 +342,7 @@ BEGIN
             AND     (f.one_way IS NULL OR f.one_way = %L)
             AND     (t.one_way IS NULL OR t.one_way = %L);
             ',  linktable,
+                'ft',
                 sourcetable,
                 sourcetable,
                 'ft',
@@ -329,8 +350,20 @@ BEGIN
 
         --from start to end
         EXECUTE format('
-            INSERT INTO %s (geom)
-            SELECT  ST_Makeline(fl.f_point,tl.t_point)
+            INSERT INTO %s (geom,
+                            direction,
+                            road_id,
+                            source_node,
+                            target_node,
+                            link_cost,
+                            link_stress)
+            SELECT  ST_Makeline(fl.f_point,tl.t_point),
+                    %L,
+                    NULL,
+                    NULL,
+                    NULL,
+                    NULL,
+                    NULL
             FROM    %s f,
                     %s t,
                     lengths fl,
@@ -342,6 +375,7 @@ BEGIN
             AND     (f.one_way IS NULL OR f.one_way = %L)
             AND     (t.one_way IS NULL OR t.one_way = %L);
             ',  linktable,
+                'ft',
                 sourcetable,
                 sourcetable,
                 'tf',
@@ -349,8 +383,20 @@ BEGIN
 
         --from start to start
         EXECUTE format('
-            INSERT INTO %s (geom)
-            SELECT  ST_Makeline(fl.f_point,tl.f_point)
+            INSERT INTO %s (geom,
+                            direction,
+                            road_id,
+                            source_node,
+                            target_node,
+                            link_cost,
+                            link_stress)
+            SELECT  ST_Makeline(fl.f_point,tl.f_point),
+                    %L,
+                    NULL,
+                    NULL,
+                    NULL,
+                    NULL,
+                    NULL
             FROM    %s f,
                     %s t,
                     lengths fl,
@@ -362,10 +408,17 @@ BEGIN
             AND     (f.one_way IS NULL OR f.one_way = %L)
             AND     (t.one_way IS NULL OR t.one_way = %L);
             ',  linktable,
+                'ft',
                 sourcetable,
                 sourcetable,
                 'tf',
                 'ft');
+    END;
+
+    BEGIN
+        EXECUTE format('ANALYZE %s;', verttable);
+        EXECUTE format('ANALYZE %s;', linktable);
+        EXECUTE format('ANALYZE %s;', turnrestricttable);
     END;
 RETURN 't';
 END $func$ LANGUAGE plpgsql;

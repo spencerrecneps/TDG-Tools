@@ -55,16 +55,18 @@ BEGIN
                 routetable);
     END;
 
-    RAISE NOTICE 'Inserting data';
-    EXECUTE format('
-        INSERT INTO %s (net_id,net_cost,net_stress)
-        SELECT  l.source_node::TEXT || %L || l.target_node::TEXT,
-                COALESCE(link_cost,0),
-                COALESCE(link_stress,1)
-        FROM    %s l
-        ',  routetable,
-            '-',
-            linktable);
+    BEGIN
+        RAISE NOTICE 'Inserting data';
+        EXECUTE format('
+            INSERT INTO %s (net_id,net_cost,net_stress)
+            SELECT  l.source_node::TEXT || %L || l.target_node::TEXT,
+                    COALESCE(link_cost,0),
+                    COALESCE(link_stress,1)
+            FROM    %s l
+            ',  routetable,
+                '-',
+                linktable);
+    END;
 
 RETURN 't';
 END $func$ LANGUAGE plpgsql;

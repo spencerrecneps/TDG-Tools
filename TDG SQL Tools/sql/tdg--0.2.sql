@@ -445,16 +445,18 @@ BEGIN
                 routetable);
     END;
 
-    RAISE NOTICE 'Inserting data';
-    EXECUTE format('
-        INSERT INTO %s (net_id,net_cost,net_stress)
-        SELECT  l.source_node::TEXT || %L || l.target_node::TEXT,
-                COALESCE(link_cost,0),
-                COALESCE(link_stress,1)
-        FROM    %s l
-        ',  routetable,
-            '-',
-            linktable);
+    BEGIN
+        RAISE NOTICE 'Inserting data';
+        EXECUTE format('
+            INSERT INTO %s (net_id,net_cost,net_stress)
+            SELECT  l.source_node::TEXT || %L || l.target_node::TEXT,
+                    COALESCE(link_cost,0),
+                    COALESCE(link_stress,1)
+            FROM    %s l
+            ',  routetable,
+                '-',
+                linktable);
+    END;
 
 RETURN 't';
 END $func$ LANGUAGE plpgsql;
@@ -485,7 +487,7 @@ DECLARE
     verttable text;
     linktable text;
     turnrestricttable text;
-    sridinfo record;
+    inttable text;
     srid int;
     indexcheck TEXT;
 
@@ -501,36 +503,23 @@ BEGIN
         schema_name=namecheck.schema_name;
         table_name=namecheck.table_name;
         IF schema_name IS NULL OR table_name IS NULL THEN
-    	RAISE NOTICE '-------> % not found',input_table;
+    	    RAISE NOTICE '-------> % not found',input_table;
             RETURN 'f';
         ELSE
-    	RAISE NOTICE '  -----> OK';
+    	    RAISE NOTICE '  -----> OK';
         END IF;
 
         sourcetable = schema_name || '.' || table_name;
         verttable = schema_name || '.' || table_name || '_net_vert';
         linktable = schema_name || '.' || table_name || '_net_link';
         turnrestricttable = schema_name || '.' || table_name || '_turn_restriction';
-    END;
-
-    --snap geom to grid to nearest 2 ft
-    BEGIN
-        RAISE NOTICE 'snapping road geometries';
-        EXECUTE format('
-            UPDATE  %s
-            SET     geom = ST_SnapToGrid(geom,2);
-            ',  sourcetable);
+        inttable = schema_name || '.' || table_name || '_intersections';
     END;
 
     --check for from/to/cost columns
     BEGIN
         RAISE NOTICE 'checking for source/target columns';
-        IF EXISTS (
-            SELECT 1 FROM pg_attribute
-            WHERE  attrelid = table_name::regclass
-            AND    attname = 'source'
-            AND    NOT attisdropped)
-        THEN
+        IF tdgColumnCheck(table_name,'source') = 't' THEN
             EXECUTE format('
                 UPDATE %s SET source=NULL;
                 ',  sourcetable);
@@ -539,12 +528,7 @@ BEGIN
                 ALTER TABLE %s ADD COLUMN source INT;
                 ',  sourcetable);
         END IF;
-        IF EXISTS (
-            SELECT 1 FROM pg_attribute
-            WHERE  attrelid = table_name::regclass
-            AND    attname = 'target'
-            AND    NOT attisdropped)
-        THEN
+        IF tdgColumnCheck(table_name,'target') = 't' THEN
             EXECUTE format('
                 UPDATE %s SET target=NULL;
                 ',  sourcetable);
@@ -553,22 +537,20 @@ BEGIN
                 ALTER TABLE %s ADD COLUMN target INT;
                 ',  sourcetable);
         END IF;
-        IF NOT EXISTS (
-            SELECT 1 FROM pg_attribute
-            WHERE  attrelid = table_name::regclass
-            AND    attname = 'ft_cost'
-            AND    NOT attisdropped)
-        THEN
+        IF tdgColumnCheck(table_name,'ft_cost') = 't' THEN
+            EXECUTE format('
+                UPDATE %s SET ft_cost=NULL;
+                ',  sourcetable);
+        ELSE
             EXECUTE format('
                 ALTER TABLE %s ADD COLUMN ft_cost INT;
                 ',  sourcetable);
         END IF;
-        IF NOT EXISTS (
-            SELECT 1 FROM pg_attribute
-            WHERE  attrelid = table_name::regclass
-            AND    attname = 'tf_cost'
-            AND    NOT attisdropped)
-        THEN
+        IF tdgColumnCheck(table_name,'tf_cost') = 't' THEN
+            EXECUTE format('
+                UPDATE %s SET tf_cost=NULL;
+                ',  sourcetable);
+        ELSE
             EXECUTE format('
                 ALTER TABLE %s ADD COLUMN tf_cost INT;
                 ',  sourcetable);
@@ -603,7 +585,7 @@ BEGIN
         RAISE NOTICE 'creating new tables';
         EXECUTE format('
             CREATE TABLE %s (   node_id serial PRIMARY KEY,
-                                node_order INT,
+                                intersection_id INT,
                                 node_cost INT,
                                 geom geometry(point,%L));
             ',  verttable,
@@ -634,10 +616,13 @@ BEGIN
         RAISE NOTICE 'creating indexes';
         EXECUTE format('
             CREATE INDEX %s ON %s USING gist (geom);
+            CREATE INDEX %s ON %s (intersection_id);
             CREATE INDEX %s ON %s (road_id);
             CREATE INDEX %s ON %s (direction);
             CREATE INDEX %s ON %s (source_node,target_node);
             ',  'sidx_' || table_name || 'vert_geom',
+                verttable,
+                'idx_' || table_name || 'vert_intid',
                 verttable,
                 'idx_' || table_name || '_link_road_id',
                 linktable,
@@ -775,8 +760,20 @@ BEGIN
 
         --from end to start
         EXECUTE format('
-            INSERT INTO %s (geom)
-            SELECT  ST_Makeline(fl.t_point,tl.f_point)
+            INSERT INTO %s (geom,
+                            direction,
+                            road_id,
+                            source_node,
+                            target_node,
+                            link_cost,
+                            link_stress)
+            SELECT  ST_Makeline(fl.t_point,tl.f_point),
+                    %L,
+                    NULL,
+                    NULL,
+                    NULL,
+                    NULL,
+                    NULL
             FROM    %s f,
                     %s t,
                     lengths fl,
@@ -788,6 +785,7 @@ BEGIN
             AND     (f.one_way IS NULL OR f.one_way = %L)
             AND     (t.one_way IS NULL OR t.one_way = %L);
             ',  linktable,
+                'ft',
                 sourcetable,
                 sourcetable,
                 'ft',
@@ -795,8 +793,20 @@ BEGIN
 
         --from end to end
         EXECUTE format('
-            INSERT INTO %s (geom)
-            SELECT  ST_Makeline(fl.t_point,tl.t_point)
+            INSERT INTO %s (geom,
+                            direction,
+                            road_id,
+                            source_node,
+                            target_node,
+                            link_cost,
+                            link_stress)
+            SELECT  ST_Makeline(fl.t_point,tl.t_point),
+                    %L,
+                    NULL,
+                    NULL,
+                    NULL,
+                    NULL,
+                    NULL
             FROM    %s f,
                     %s t,
                     lengths fl,
@@ -808,6 +818,7 @@ BEGIN
             AND     (f.one_way IS NULL OR f.one_way = %L)
             AND     (t.one_way IS NULL OR t.one_way = %L);
             ',  linktable,
+                'ft',
                 sourcetable,
                 sourcetable,
                 'ft',
@@ -815,8 +826,20 @@ BEGIN
 
         --from start to end
         EXECUTE format('
-            INSERT INTO %s (geom)
-            SELECT  ST_Makeline(fl.f_point,tl.t_point)
+            INSERT INTO %s (geom,
+                            direction,
+                            road_id,
+                            source_node,
+                            target_node,
+                            link_cost,
+                            link_stress)
+            SELECT  ST_Makeline(fl.f_point,tl.t_point),
+                    %L,
+                    NULL,
+                    NULL,
+                    NULL,
+                    NULL,
+                    NULL
             FROM    %s f,
                     %s t,
                     lengths fl,
@@ -828,6 +851,7 @@ BEGIN
             AND     (f.one_way IS NULL OR f.one_way = %L)
             AND     (t.one_way IS NULL OR t.one_way = %L);
             ',  linktable,
+                'ft',
                 sourcetable,
                 sourcetable,
                 'tf',
@@ -835,8 +859,20 @@ BEGIN
 
         --from start to start
         EXECUTE format('
-            INSERT INTO %s (geom)
-            SELECT  ST_Makeline(fl.f_point,tl.f_point)
+            INSERT INTO %s (geom,
+                            direction,
+                            road_id,
+                            source_node,
+                            target_node,
+                            link_cost,
+                            link_stress)
+            SELECT  ST_Makeline(fl.f_point,tl.f_point),
+                    %L,
+                    NULL,
+                    NULL,
+                    NULL,
+                    NULL,
+                    NULL
             FROM    %s f,
                     %s t,
                     lengths fl,
@@ -848,10 +884,17 @@ BEGIN
             AND     (f.one_way IS NULL OR f.one_way = %L)
             AND     (t.one_way IS NULL OR t.one_way = %L);
             ',  linktable,
+                'ft',
                 sourcetable,
                 sourcetable,
                 'tf',
                 'ft');
+    END;
+
+    BEGIN
+        EXECUTE format('ANALYZE %s;', verttable);
+        EXECUTE format('ANALYZE %s;', linktable);
+        EXECUTE format('ANALYZE %s;', turnrestricttable);
     END;
 RETURN 't';
 END $func$ LANGUAGE plpgsql;
@@ -1024,6 +1067,15 @@ BEGIN
         EXECUTE query;
     END;
 
+    --snap geom to grid to nearest 2 ft
+    BEGIN
+        RAISE NOTICE 'snapping road geometries';
+        EXECUTE format('
+            UPDATE  %s
+            SET     geom = ST_SnapToGrid(geom,2);
+            ',  outtabname);
+    END;
+
     --indexes
     BEGIN
         EXECUTE format('
@@ -1041,8 +1093,90 @@ BEGIN
                 outtabname);
     END;
 
-    EXECUTE format('ANALYZE %s;', output_table);
+    BEGIN
+        EXECUTE format('ANALYZE %s;', output_table);
+    END;
+
+    BEGIN
+        PERFORM tdgMakeIntersections(outtabname::REGCLASS);
+    END;
+
     RETURN 't';
+END $func$ LANGUAGE plpgsql;
+CREATE OR REPLACE FUNCTION tdgMakeIntersections (input_table REGCLASS)
+RETURNS BOOLEAN AS $func$
+
+DECLARE
+    namecheck RECORD;
+    schema_name TEXT;
+    table_name TEXT;
+    inttable text;
+    sridinfo record;
+    srid int;
+
+BEGIN
+    RAISE NOTICE 'PROCESSING:';
+
+    --check table and schema
+    BEGIN
+        RAISE NOTICE 'Checking % exists',input_table;
+        EXECUTE '   SELECT  schema_name,
+                            table_name
+                    FROM    tdgTableDetails('||quote_literal(input_table)||') AS (schema_name TEXT, table_name TEXT)' INTO namecheck;
+        schema_name:=namecheck.schema_name;
+        table_name:=namecheck.table_name;
+        IF schema_name IS NULL OR table_name IS NULL THEN
+            RAISE NOTICE '-------> % not found',input_table;
+            RETURN 'f';
+        ELSE
+            RAISE NOTICE '  -----> OK';
+        END IF;
+
+        inttable = schema_name || '.' || table_name || '_intersections';
+    END;
+
+    --get srid of the geom
+    BEGIN
+        EXECUTE format('SELECT tdgGetSRID(to_regclass(%L),%s)',input_table,quote_literal('geom')) INTO srid;
+
+        IF srid IS NULL THEN
+            RAISE NOTICE 'ERROR: Can not determine the srid of the geometry in table %', t_name;
+            RETURN 'f';
+        END IF;
+        RAISE NOTICE '  -----> SRID found %',srid;
+    END;
+
+    BEGIN
+        RAISE NOTICE 'creating intersection table';
+        EXECUTE format('
+            CREATE TABLE %s (   id serial PRIMARY KEY,
+                                geom geometry(point,%L),
+                                legs INT,
+                                signalized BOOLEAN);
+            ',  inttable,
+                srid);
+    END;
+
+    BEGIN
+        RAISE NOTICE 'adding intersections';
+        EXECUTE format('
+            CREATE TEMP TABLE v (i INT, geom geometry(point,%L)) ON COMMIT DROP;
+            INSERT INTO v (i, geom) SELECT id, ST_StartPoint(geom) FROM %s ORDER BY id ASC;
+            INSERT INTO v (i, geom) SELECT id, ST_EndPoint(geom) FROM %s ORDER BY id ASC;
+            INSERT INTO %s (legs, geom)
+            SELECT      COUNT(i),
+                        geom
+            FROM        v
+            GROUP BY    geom;
+            ',  srid,
+                input_table,
+                input_table,
+                inttable);
+    END;
+
+EXECUTE format('ANALYZE %s;', inttable);
+
+RETURN 't';
 END $func$ LANGUAGE plpgsql;
 CREATE OR REPLACE FUNCTION tdgGetSRID(input_table REGCLASS,geom_name TEXT)
 RETURNS INT AS $func$
