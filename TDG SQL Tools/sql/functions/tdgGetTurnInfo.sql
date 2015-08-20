@@ -5,9 +5,9 @@ RETURNS BOOLEAN AS $func$
 BEGIN
     --assign 'straight' to non-intersections
     EXECUTE format('
-        UPDATE  %s
+        UPDATE  %I
         SET     movement = %L
-        FROM    %s ints
+        FROM    %I ints
         WHERE   ints.id = intersection_id
         AND     ints.legs = 2;
         ',  link_table,
@@ -15,12 +15,17 @@ BEGIN
             inttable);
 
     --left turns at 3-legged intersections
+    EXECUTE format('
+        UPDATE  %I
+        SET     movement = %L
+        FROM    %I ints
+        WHERE   ints.id = intersection_id
+        AND     ints.legs = 3;
+        ',  link_table,
+            'left',
+            inttable);
     --need to fix this
-    UPDATE  link_table
-    SET     movement = 'left'
-    FROM    inttable ints
-    WHERE   ints.id = intersection_id
-    AND     ints.legs = 3;
+
 
 
     --right turns at 3-legged intersections

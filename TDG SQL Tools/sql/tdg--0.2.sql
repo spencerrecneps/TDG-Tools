@@ -494,6 +494,7 @@ DECLARE
 BEGIN
     RAISE NOTICE 'PROCESSING:';
 
+
     --check table and schema
     BEGIN
         RAISE NOTICE 'Checking % exists',input_table;
@@ -515,6 +516,7 @@ BEGIN
         turnrestricttable = schema_name || '.' || table_name || '_turn_restriction';
         inttable = schema_name || '.' || table_name || '_intersections';
     END;
+
 
     --check for from/to/cost columns
     BEGIN
@@ -557,6 +559,7 @@ BEGIN
         END IF;
     END;
 
+
     --get srid of the geom
     BEGIN
         EXECUTE format('SELECT tdgGetSRID(to_regclass(%L),%s)',input_table,quote_literal('geom')) INTO srid;
@@ -567,6 +570,7 @@ BEGIN
         END IF;
         RAISE NOTICE '  -----> SRID found %',srid;
     END;
+
 
     --drop old tables
     BEGIN
@@ -579,6 +583,7 @@ BEGIN
                 verttable,
                 linktable);
     END;
+
 
     --create new tables
     BEGIN
@@ -614,6 +619,7 @@ BEGIN
                 srid);
     END;
 
+
     --indexes
     BEGIN
         RAISE NOTICE 'creating indexes';
@@ -642,7 +648,8 @@ BEGIN
         END IF;
     END;
 
-    --create temporary table of all possible vertices table
+
+    --create temporary table of all possible vertices
     EXECUTE format('
         CREATE TEMP TABLE v (   id SERIAL PRIMARY KEY,
                                 road_id INT,
@@ -655,9 +662,11 @@ BEGIN
         ',  srid,
             srid);
 
+
     --insert vertices
     BEGIN
         RAISE NOTICE 'adding points to vertices table';
+
         EXECUTE format('
             INSERT INTO v (road_id, loc, int_geom, vert_geom)
             SELECT      id,
@@ -666,7 +675,10 @@ BEGIN
                         ST_LineInterpolatePoint(s.geom,LEAST(0.5*ST_Length(s.geom)-5,50.0)/ST_Length(s.geom))
             FROM        %s s
             ORDER BY    id ASC;
+            ',  'f',
+                sourcetable);
 
+        EXECUTE format('
             INSERT INTO v (road_id, loc, int_geom, vert_geom)
             SELECT      id,
                         %L,
@@ -674,56 +686,62 @@ BEGIN
                         ST_LineInterpolatePoint(s.geom,GREATEST(0.5*ST_Length(s.geom)+5,ST_Length(s.geom)-50)/ST_Length(s.geom))
             FROM        %s s
             ORDER BY    id ASC;
+            ',  't',
+                sourcetable);
 
+        --get intersections for v
+        EXECUTE format('
+            UPDATE  v
+            SET     int_id = intersection.id
+            FROM    %s intersection
+            WHERE   v.int_geom = intersection.geom;
+            ',  inttable);
+
+        --insert points into vertices table
+        EXECUTE format('
             INSERT INTO %s (intersection_id, geom)
             SELECT      intersection.id,
                         v.vert_geom
             FROM        v,
                         %s intersection
-            WHERE       v.int_geom = intersection.geom
+            WHERE       v.int_id = intersection.id
+            AND         intersection.legs > 2
             GROUP BY    intersection.id,
                         v.vert_geom;
-            ',  'f',
-                sourcetable,
-                't',
-                sourcetable,
-                verttable,
+            ',  verttable,
+                inttable);
+
+        EXECUTE format('
+            INSERT INTO %s (intersection_id, geom)
+            SELECT      intersection.id,
+                        v.int_geom
+            FROM        v,
+                        %s intersection
+            WHERE       v.int_id = intersection.id
+            AND         intersection.legs < 3
+            GROUP BY    intersection.id,
+                        v.int_geom;
+            ',  verttable,
                 inttable);
     END;
 
-    --join back the vertices to the temporary table
-    EXECUTE format('
-        UPDATE  v
-        SET     vert_id = vx.node_id
-        FROM    %s vx
-        WHERE   v.vert_geom = vx.geom;
-        ',  verttable);
 
-    --join intersections to the temporary table
-    EXECUTE format('
-        UPDATE  v
-        SET     int_id = i.id
-        FROM    %s i
-        WHERE   v.int_geom = i.geom;
-        ',  inttable);
-
-    --set source/target info
+    --join back the vertices to v
     BEGIN
-        RAISE NOTICE 'setting source/target info';
         EXECUTE format('
-            UPDATE  %s
-            SET     source = vf.vert_id,
-                    target = vt.vert_id
-            FROM    v vf,
-                    v vt
-            WHERE   %I.id = vf.road_id AND vf.loc = %L
-            AND     %I.id = vt.road_id AND vt.loc = %L;
-            ',  sourcetable,
-                input_table,
-                'f',
-                input_table,
-                't');
+            UPDATE  v
+            SET     vert_id = vx.node_id
+            FROM    %s vx
+            WHERE   v.vert_geom = vx.geom;
+            ',  verttable);
+        EXECUTE format('
+            UPDATE  v
+            SET     vert_id = vx.node_id
+            FROM    %s vx
+            WHERE   v.int_geom = vx.geom;
+            ',  verttable);
     END;
+
 
     --populate links tables
     BEGIN
@@ -911,6 +929,45 @@ BEGIN
                 'ft');
     END;
 
+
+    --set source/target info
+    BEGIN
+        RAISE NOTICE 'setting source/target info';
+        EXECUTE format('
+            UPDATE  %s
+            SET     source_node = vf.vert_id,
+                    target_node = vt.vert_id
+            FROM    v vf,
+                    v vt
+            WHERE   %s.direction = %L
+            AND     %s.road_id = vf.road_id AND vf.loc = %L
+            AND     %s.road_id = vt.road_id AND vt.loc = %L;
+            ',  linktable,
+                linktable,
+                'ft',
+                linktable,
+                'f',
+                linktable,
+                't');
+        EXECUTE format('
+            UPDATE  %s
+            SET     source_node = vt.vert_id,
+                    target_node = vf.vert_id
+            FROM    v vf,
+                    v vt
+            WHERE   %s.direction = %L
+            AND     %s.road_id = vf.road_id AND vf.loc = %L
+            AND     %s.road_id = vt.road_id AND vt.loc = %L;
+            ',  linktable,
+                linktable,
+                'tf',
+                linktable,
+                'f',
+                linktable,
+                't');
+    END;
+
+
     --get turn information
     BEGIN
         EXECUTE format('
@@ -934,9 +991,9 @@ RETURNS BOOLEAN AS $func$
 BEGIN
     --assign 'straight' to non-intersections
     EXECUTE format('
-        UPDATE  %s
+        UPDATE  %I
         SET     movement = %L
-        FROM    %s ints
+        FROM    %I ints
         WHERE   ints.id = intersection_id
         AND     ints.legs = 2;
         ',  link_table,
@@ -944,11 +1001,17 @@ BEGIN
             inttable);
 
     --left turns at 3-legged intersections
-    UPDATE  link_table::REGCLASS
-    SET     movement = 'left'
-    FROM    inttable ints
-    WHERE   ints.id = intersection_id
-    AND     ints.legs = 3;
+    EXECUTE format('
+        UPDATE  %I
+        SET     movement = %L
+        FROM    %I ints
+        WHERE   ints.id = intersection_id
+        AND     ints.legs = 3;
+        ',  link_table,
+            'left',
+            inttable);
+    --need to fix this
+
 
 
     --right turns at 3-legged intersections
