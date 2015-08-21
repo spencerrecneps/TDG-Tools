@@ -743,7 +743,7 @@ BEGIN
     END;
 
 
-    --populate links tables
+    --populate direct links
     BEGIN
         RAISE NOTICE 'adding links';
         EXECUTE format('
@@ -827,106 +827,107 @@ BEGIN
                 'tf',
                 sourcetable,
                 'tf');
+        --
+        -- --from end to start
+        -- EXECUTE format('
+        --     INSERT INTO %s (geom,
+        --                     direction,
+        --                     intersection_id)
+        --     SELECT  ST_Makeline(fl.t_point,tl.f_point),
+        --             %L,
+        --             fl.t_int_id
+        --     FROM    %s f,
+        --             %s t,
+        --             lengths fl,
+        --             lengths tl
+        --     WHERE   f.id != t.id
+        --     AND     f.target = t.source
+        --     AND     f.id = fl.id
+        --     AND     t.id = tl.id
+        --     AND     (f.one_way IS NULL OR f.one_way = %L)
+        --     AND     (t.one_way IS NULL OR t.one_way = %L);
+        --     ',  linktable,
+        --         'ft',
+        --         sourcetable,
+        --         sourcetable,
+        --         'ft',
+        --         'ft');
+        --
+        -- --from end to end
+        -- EXECUTE format('
+        --     INSERT INTO %s (geom,
+        --                     direction,
+        --                     intersection_id)
+        --     SELECT  ST_Makeline(fl.t_point,tl.t_point),
+        --             %L,
+        --             fl.t_int_id
+        --     FROM    %s f,
+        --             %s t,
+        --             lengths fl,
+        --             lengths tl
+        --     WHERE   f.id != t.id
+        --     AND     f.target = t.target
+        --     AND     f.id = fl.id
+        --     AND     t.id = tl.id
+        --     AND     (f.one_way IS NULL OR f.one_way = %L)
+        --     AND     (t.one_way IS NULL OR t.one_way = %L);
+        --     ',  linktable,
+        --         'ft',
+        --         sourcetable,
+        --         sourcetable,
+        --         'ft',
+        --         'tf');
+        --
+        -- --from start to end
+        -- EXECUTE format('
+        --     INSERT INTO %s (geom,
+        --                     direction,
+        --                     intersection_id)
+        --     SELECT  ST_Makeline(fl.f_point,tl.t_point),
+        --             %L,
+        --             fl.f_int_id
+        --     FROM    %s f,
+        --             %s t,
+        --             lengths fl,
+        --             lengths tl
+        --     WHERE   f.id != t.id
+        --     AND     f.source = t.target
+        --     AND     f.id = fl.id
+        --     AND     t.id = tl.id
+        --     AND     (f.one_way IS NULL OR f.one_way = %L)
+        --     AND     (t.one_way IS NULL OR t.one_way = %L);
+        --     ',  linktable,
+        --         'ft',
+        --         sourcetable,
+        --         sourcetable,
+        --         'tf',
+        --         'tf');
+        --
+        -- --from start to start
+        -- EXECUTE format('
+        --     INSERT INTO %s (geom,
+        --                     direction,
+        --                     intersection_id)
+        --     SELECT  ST_Makeline(fl.f_point,tl.f_point),
+        --             %L,
+        --             fl.f_int_id
+        --     FROM    %s f,
+        --             %s t,
+        --             lengths fl,
+        --             lengths tl
+        --     WHERE   f.id != t.id
+        --     AND     f.source = t.source
+        --     AND     f.id = fl.id
+        --     AND     t.id = tl.id
+        --     AND     (f.one_way IS NULL OR f.one_way = %L)
+        --     AND     (t.one_way IS NULL OR t.one_way = %L);
+        --     ',  linktable,
+        --         'ft',
+        --         sourcetable,
+        --         sourcetable,
+        --         'tf',
+        --         'ft');
 
-        --from end to start
-        EXECUTE format('
-            INSERT INTO %s (geom,
-                            direction,
-                            intersection_id)
-            SELECT  ST_Makeline(fl.t_point,tl.f_point),
-                    %L,
-                    fl.t_int_id
-            FROM    %s f,
-                    %s t,
-                    lengths fl,
-                    lengths tl
-            WHERE   f.id != t.id
-            AND     f.target = t.source
-            AND     f.id = fl.id
-            AND     t.id = tl.id
-            AND     (f.one_way IS NULL OR f.one_way = %L)
-            AND     (t.one_way IS NULL OR t.one_way = %L);
-            ',  linktable,
-                'ft',
-                sourcetable,
-                sourcetable,
-                'ft',
-                'ft');
-
-        --from end to end
-        EXECUTE format('
-            INSERT INTO %s (geom,
-                            direction,
-                            intersection_id)
-            SELECT  ST_Makeline(fl.t_point,tl.t_point),
-                    %L,
-                    fl.t_int_id
-            FROM    %s f,
-                    %s t,
-                    lengths fl,
-                    lengths tl
-            WHERE   f.id != t.id
-            AND     f.target = t.target
-            AND     f.id = fl.id
-            AND     t.id = tl.id
-            AND     (f.one_way IS NULL OR f.one_way = %L)
-            AND     (t.one_way IS NULL OR t.one_way = %L);
-            ',  linktable,
-                'ft',
-                sourcetable,
-                sourcetable,
-                'ft',
-                'tf');
-
-        --from start to end
-        EXECUTE format('
-            INSERT INTO %s (geom,
-                            direction,
-                            intersection_id)
-            SELECT  ST_Makeline(fl.f_point,tl.t_point),
-                    %L,
-                    fl.f_int_id
-            FROM    %s f,
-                    %s t,
-                    lengths fl,
-                    lengths tl
-            WHERE   f.id != t.id
-            AND     f.source = t.target
-            AND     f.id = fl.id
-            AND     t.id = tl.id
-            AND     (f.one_way IS NULL OR f.one_way = %L)
-            AND     (t.one_way IS NULL OR t.one_way = %L);
-            ',  linktable,
-                'ft',
-                sourcetable,
-                sourcetable,
-                'tf',
-                'tf');
-
-        --from start to start
-        EXECUTE format('
-            INSERT INTO %s (geom,
-                            direction,
-                            intersection_id)
-            SELECT  ST_Makeline(fl.f_point,tl.f_point),
-                    %L,
-                    fl.f_int_id
-            FROM    %s f,
-                    %s t,
-                    lengths fl,
-                    lengths tl
-            WHERE   f.id != t.id
-            AND     f.source = t.source
-            AND     f.id = fl.id
-            AND     t.id = tl.id
-            AND     (f.one_way IS NULL OR f.one_way = %L)
-            AND     (t.one_way IS NULL OR t.one_way = %L);
-            ',  linktable,
-                'ft',
-                sourcetable,
-                sourcetable,
-                'tf',
-                'ft');
     END;
 
 
@@ -965,6 +966,32 @@ BEGIN
                 'f',
                 linktable,
                 't');
+    END;
+
+
+    --populate connector links
+    BEGIN
+        EXECUTE format('
+            INSERT INTO %s (geom,
+                            direction,
+                            intersection_id,
+                            link_cost,
+                            link_stress)
+            SELECT  ST_Makeline(v1.geom,v2.geom),
+                    NULL,
+                    v1.intersection_id,
+                    NULL,
+                    NULL
+            FROM    %s v1,
+                    %s v2,
+                    %s s
+            WHERE   v1.node_id != v2.node_id
+            AND     v1.intersection_id = v2.intersection_id
+            AND     s.target_node = v1.node_id;
+            ',  linktable,
+                verttable,
+                verttable,
+                linktable);
     END;
 
 
