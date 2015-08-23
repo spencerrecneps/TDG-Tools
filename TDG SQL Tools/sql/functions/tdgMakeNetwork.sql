@@ -494,28 +494,35 @@ BEGIN
 
 
     --populate connector links
-    --NEEDS TO BE TESTED!!!
+    --NOT GETTING INTERSECTION ID
     BEGIN
         EXECUTE format('
             INSERT INTO %s (geom,
                             direction,
                             intersection_id,
+                            source_node,
+                            target_node,
                             link_cost,
                             link_stress)
             SELECT  ST_Makeline(v1.geom,v2.geom),
                     NULL,
                     v1.intersection_id,
+                    v1.node_id,
+                    v2.node_id,
                     NULL,
                     NULL
             FROM    %s v1,
                     %s v2,
-                    %s s
+                    %s s1,
+                    %s s2
             WHERE   v1.node_id != v2.node_id
             AND     v1.intersection_id = v2.intersection_id
-            AND     s.target_node = v1.node_id;
+            AND     s1.target_node = v1.node_id
+            AND     s2.source_node = v2.node_id;
             ',  linktable,
                 verttable,
                 verttable,
+                linktable,
                 linktable);
     END;
 
@@ -524,9 +531,13 @@ BEGIN
     BEGIN
         EXECUTE format('
             UPDATE  %s
-            SET     azimuth = ST_Azimuth(ST_StartPoint(geom),ST_EndPoint(geom));
+            SET     azimuth = degrees(ST_Azimuth(ST_StartPoint(geom),ST_EndPoint(geom)));
             ',  linktable);
-        PERFORM tdgGetTurnInfo(linktable,inttable);
+        EXECUTE format('
+            SELECT tdgSetTurnInfo(%L,%L,%L);
+            ',  linktable,
+                inttable,
+                verttable);
     END;
 
     BEGIN

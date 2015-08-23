@@ -55,6 +55,7 @@ BEGIN
         IF overwrite THEN
             RAISE NOTICE 'DROPPING TABLE %', output_table;
             EXECUTE format('DROP TABLE IF EXISTS %s',output_table);
+            EXECUTE format('DROP TABLE IF EXISTS %s',output_table||'_intersections');
         END IF;
     END;
 
