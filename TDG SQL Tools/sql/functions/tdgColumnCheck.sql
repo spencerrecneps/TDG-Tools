@@ -12,3 +12,4 @@ BEGIN
     END IF;
 RETURN 'f';
 END $func$ LANGUAGE plpgsql;
+ALTER FUNCTION tdgColumnCheck(REGCLASS, TEXT) OWNER TO gis;

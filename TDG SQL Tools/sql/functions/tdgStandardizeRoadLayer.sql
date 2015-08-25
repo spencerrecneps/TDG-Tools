@@ -204,3 +204,5 @@ BEGIN
 
     RETURN 't';
 END $func$ LANGUAGE plpgsql;
+ALTER FUNCTION tdgStandardizeRoadLayer( REGCLASS,TEXT,TEXT,TEXT,TEXT,TEXT,
+                                        TEXT,TEXT,BOOLEAN,BOOLEAN) OWNER TO gis;

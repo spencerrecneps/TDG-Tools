@@ -545,3 +545,4 @@ BEGIN
     END;
 RETURN 't';
 END $func$ LANGUAGE plpgsql;
+ALTER FUNCTION tdgMakeNetwork(REGCLASS) OWNER TO gis;

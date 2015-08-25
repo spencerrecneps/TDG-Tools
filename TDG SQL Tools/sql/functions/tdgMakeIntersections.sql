@@ -72,3 +72,4 @@ EXECUTE format('ANALYZE %s;', inttable);
 
 RETURN 't';
 END $func$ LANGUAGE plpgsql;
+ALTER FUNCTION tdgMakeIntersections(REGCLASS) OWNER TO gis;

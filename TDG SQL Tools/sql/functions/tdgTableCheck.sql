@@ -15,3 +15,4 @@ BEGIN
 
 RETURN 't';
 END $func$ LANGUAGE plpgsql;
+ALTER FUNCTION tdgTableCheck(REGCLASS) OWNER TO gis;

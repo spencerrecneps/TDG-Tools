@@ -347,6 +347,7 @@ BEGIN
 
 RETURN 't';
 END $func$ LANGUAGE plpgsql;
+ALTER FUNCTION tdgSetTurnInfo(REGCLASS,REGCLASS,REGCLASS,INT[]) OWNER TO gis;
 CREATE OR REPLACE FUNCTION tdgGenerateCrossStreetData(input_table REGCLASS)
 --populate cross-street data
 RETURNS BOOLEAN AS $func$
@@ -531,6 +532,7 @@ BEGIN
 
     RETURN 't';
 END $func$ LANGUAGE plpgsql;
+ALTER FUNCTION tdgGenerateCrossStreetData(REGCLASS) OWNER TO gis;
 CREATE OR REPLACE FUNCTION tdgTableCheck (input_table REGCLASS)
 RETURNS BOOLEAN AS $func$
 
@@ -548,15 +550,7 @@ BEGIN
 
 RETURN 't';
 END $func$ LANGUAGE plpgsql;
-CREATE OR REPLACE FUNCTION tdgUpdateRouter (input_table REGCLASS, rowids INT[])
-RETURNS BOOLEAN AS $func$
-
-DECLARE
-
-BEGIN
-
-RETURN 't';
-END $func$ LANGUAGE plpgsql;
+ALTER FUNCTION tdgTableCheck(REGCLASS) OWNER TO gis;
 CREATE OR REPLACE FUNCTION tdgUpdateNetwork (input_table REGCLASS, rowids INT[])
 RETURNS BOOLEAN AS $func$
 
@@ -566,92 +560,7 @@ BEGIN
 
 RETURN 't';
 END $func$ LANGUAGE plpgsql;
-CREATE OR REPLACE FUNCTION tdgMakeRouter (input_table REGCLASS)
-RETURNS BOOLEAN AS $func$
-
-DECLARE
-    namecheck RECORD;
-    schema_name TEXT;
-    table_name TEXT;
-    routetable TEXT;
-    linktable TEXT;
-    verttable TEXT;
-
-BEGIN
-    BEGIN
-        --make sure the input table exists and get infos
-        RAISE NOTICE 'Checking % exists',input_table;
-        EXECUTE '   SELECT  schema_name,
-                            table_name
-                    FROM    tdgTableDetails('||quote_literal(input_table)||') AS (schema_name TEXT, table_name TEXT)' INTO namecheck;
-        schema_name=namecheck.schema_name;
-        table_name=namecheck.table_name;
-        IF schema_name IS NULL OR table_name IS NULL THEN
-            RAISE NOTICE '-------> % not found',input_table;
-            RETURN 'f';
-        END IF;
-
-        --set table names
-        routetable = schema_name || '.' || table_name || '_net_router';
-        linktable = schema_name || '.' || table_name || '_net_link';
-        verttable = schema_name || '.' || table_name || '_net_vert';
-
-        --check whether link and vert tables exist
-        IF tdgTableCheck(linktable) = 'f' THEN
-            RAISE NOTICE '--------> % not found',linktable;
-            RETURN 'f';
-        END IF;
-        IF tdgTableCheck(verttable) = 'f' THEN
-            RAISE NOTICE '--------> % not found',verttable;
-            RETURN 'f';
-        END IF;
-
-        --create new routing table
-        RAISE NOTICE 'Creating routing table %',routetable;
-        EXECUTE format('DROP TABLE IF EXISTS %s;',routetable);
-        EXECUTE format('
-            CREATE TABLE %s (
-                id SERIAL PRIMARY KEY,
-                net_id TEXT,
-                link_id INT,
-                int_id INT,
-                net_cost INT,
-                net_stress INT
-            )
-            ',  routetable);
-        EXECUTE format('
-            CREATE INDEX %s ON %s (net_id);'
-            ,  'idx_'||table_name||'_router_netid',
-                routetable);
-        EXECUTE format('
-            CREATE INDEX %s ON %s (link_id,int_id);'
-            ,  'idx_'||table_name||'_router_linkint',
-                routetable);
-        EXECUTE format('
-            CREATE INDEX %s ON %s (net_stress);'
-            ,  'idx_'||table_name||'_router_stress',
-                routetable);
-    END;
-
-    BEGIN
-        RAISE NOTICE 'Inserting data';
-        EXECUTE format('
-            INSERT INTO %s (net_id,net_cost,net_stress)
-            SELECT  l.source_node::TEXT || %L || l.target_node::TEXT,
-                    COALESCE(link_cost,0),
-                    COALESCE(link_stress,1)
-            FROM    %s l
-            ',  routetable,
-                '-',
-                linktable);
-    END;
-
-    PERFORM format('
-        ANALYZE %s;
-        ',  routetable);
-
-RETURN 't';
-END $func$ LANGUAGE plpgsql;
+ALTER FUNCTION tdgUpdateNetwork(REGCLASS,INT[]) OWNER TO gis;
 CREATE OR REPLACE FUNCTION tdgColumnCheck (input_table REGCLASS, column_name TEXT)
 RETURNS BOOLEAN AS $func$
 
@@ -666,6 +575,7 @@ BEGIN
     END IF;
 RETURN 'f';
 END $func$ LANGUAGE plpgsql;
+ALTER FUNCTION tdgColumnCheck(REGCLASS, TEXT) OWNER TO gis;
 CREATE OR REPLACE FUNCTION tdgMakeNetwork(input_table REGCLASS)
 --need triggers to automatically update vertices and links
 RETURNS BOOLEAN AS $func$
@@ -1213,6 +1123,7 @@ BEGIN
     END;
 RETURN 't';
 END $func$ LANGUAGE plpgsql;
+ALTER FUNCTION tdgMakeNetwork(REGCLASS) OWNER TO gis;
 CREATE OR REPLACE FUNCTION tdgStandardizeRoadLayer( input_table REGCLASS,
                                                     output_table TEXT,
                                                     id_field TEXT,
@@ -1419,6 +1330,8 @@ BEGIN
 
     RETURN 't';
 END $func$ LANGUAGE plpgsql;
+ALTER FUNCTION tdgStandardizeRoadLayer( REGCLASS,TEXT,TEXT,TEXT,TEXT,TEXT,
+                                        TEXT,TEXT,BOOLEAN,BOOLEAN) OWNER TO gis;
 CREATE OR REPLACE FUNCTION tdgMakeIntersections (input_table REGCLASS)
 RETURNS BOOLEAN AS $func$
 
@@ -1493,6 +1406,44 @@ EXECUTE format('ANALYZE %s;', inttable);
 
 RETURN 't';
 END $func$ LANGUAGE plpgsql;
+ALTER FUNCTION tdgMakeIntersections(REGCLASS) OWNER TO gis;
+CREATE OR REPLACE FUNCTION tdgGenerateIntersectionStreets (input_table REGCLASS, intids INT[])
+RETURNS BOOLEAN AS $func$
+
+DECLARE
+
+BEGIN
+
+RETURN 't';
+END $func$ LANGUAGE plpgsql;
+ALTER FUNCTION tdgGenerateIntersectionStreets(REGCLASS, INT[]) OWNER TO gis;
+-- CREATE OR REPLACE FUNCTION tdgShortestPath (input_table REGCLASS)
+-- RETURNS TABLE ( link_id INT,
+--                 vert_id INT,
+--                 road_id INT,
+--                 int_id INT,
+--                 move_cost INT) AS $$
+--
+-- import networkx
+-- return ([1,2,3,4,5],[6,5,4,3,2])
+--
+-- $$ LANGUAGE plpythonu;
+-- ALTER FUNCTION tdgShortestPath(REGCLASS) OWNER TO gis;
+
+CREATE FUNCTION pyversion() RETURNS text AS $$
+import sys
+return sys.version + '\n' + '\n'.join(sys.path)
+$$ LANGUAGE plpythonu;
+ALTER FUNCTION pyversion() OWNER TO gis;
+
+CREATE OR REPLACE FUNCTION foo()
+RETURNS BOOLEAN AS $$
+
+import networkx
+return True
+
+$$ LANGUAGE plpythonu;
+ALTER FUNCTION foo() OWNER TO gis;
 CREATE OR REPLACE FUNCTION tdgGetSRID(input_table REGCLASS,geom_name TEXT)
 RETURNS INT AS $func$
 
@@ -1510,6 +1461,7 @@ BEGIN
 
     RETURN geomdetails.srid;
 END $func$ LANGUAGE plpgsql;
+ALTER FUNCTION tdgGetSRID(REGCLASS,TEXT) OWNER TO gis;
 CREATE OR REPLACE FUNCTION tdgCalculateStress(  _input_table REGCLASS,
                                                 _seg BOOLEAN,
                                                 _approach BOOLEAN,
@@ -2000,6 +1952,7 @@ BEGIN
 
     RETURN 't';
 END $func$ LANGUAGE plpgsql;
+ALTER FUNCTION tdgCalculateStress(REGCLASS,BOOLEAN,BOOLEAN,BOOLEAN,INT[]) OWNER TO gis;
 CREATE OR REPLACE FUNCTION tdgTableDetails(input_table REGCLASS)
 RETURNS RECORD AS $func$
 
@@ -2016,3 +1969,4 @@ BEGIN
 
     RETURN tabledetails;
 END $func$ LANGUAGE plpgsql;
+ALTER FUNCTION tdgTableDetails(REGCLASS) OWNER TO gis;

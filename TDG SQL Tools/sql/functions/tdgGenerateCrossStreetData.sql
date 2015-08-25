@@ -182,3 +182,4 @@ BEGIN
 
     RETURN 't';
 END $func$ LANGUAGE plpgsql;
+ALTER FUNCTION tdgGenerateCrossStreetData(REGCLASS) OWNER TO gis;

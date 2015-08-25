@@ -15,3 +15,4 @@ BEGIN
 
     RETURN geomdetails.srid;
 END $func$ LANGUAGE plpgsql;
+ALTER FUNCTION tdgGetSRID(REGCLASS,TEXT) OWNER TO gis;

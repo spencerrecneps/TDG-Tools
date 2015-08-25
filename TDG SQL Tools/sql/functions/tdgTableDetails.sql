@@ -14,3 +14,4 @@ BEGIN
 
     RETURN tabledetails;
 END $func$ LANGUAGE plpgsql;
+ALTER FUNCTION tdgTableDetails(REGCLASS) OWNER TO gis;

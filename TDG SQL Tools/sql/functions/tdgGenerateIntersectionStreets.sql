@@ -7,3 +7,4 @@ BEGIN
 
 RETURN 't';
 END $func$ LANGUAGE plpgsql;
+ALTER FUNCTION tdgGenerateIntersectionStreets(REGCLASS, INT[]) OWNER TO gis;
