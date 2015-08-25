@@ -145,8 +145,8 @@ class ImportRoadLayer(GeoAlgorithm):
         #linestrings = processing.runalg('qgis:multiparttosingleparts')
 
         # first create the tdg database extension if it doesn't exist
-        processing.runalg("qgis:postgisexecutesql",database,
-            "CREATE EXTENSION IF NOT EXISTS tdg")
+        #processing.runalg("qgis:postgisexecutesql",database,
+        #    "CREATE EXTENSION IF NOT EXISTS tdg")
 
         # set up the new table's uri
         uri = QgsDataSourceURI()
