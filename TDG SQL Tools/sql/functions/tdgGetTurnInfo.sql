@@ -1,6 +1,7 @@
 CREATE OR REPLACE FUNCTION tdgSetTurnInfo ( linktable REGCLASS,
                                             inttable REGCLASS,
-                                            verttable REGCLASS)
+                                            verttable REGCLASS,
+                                            intersection_ids INT[])
 RETURNS BOOLEAN AS $func$
 
 DECLARE
@@ -31,24 +32,26 @@ BEGIN
                 l2.id,
                 degrees(ST_Azimuth(ST_StartPoint(l1.geom),ST_EndPoint(l1.geom))),
                 degrees(ST_Azimuth(ST_StartPoint(l2.geom),ST_EndPoint(l2.geom)))
-        FROM    %s int,
-                %s v1,
-                %s v2,
-                %s l1,
-                %s l2
-        WHERE   int.id = v1.intersection_id
-        AND     int.id = v2.intersection_id
-        AND     l1.target_node = v1.node_id
-        AND     l2.source_node = v2.node_id
-        AND     l1.road_id IS NOT NULL
-        AND     l2.road_id IS NOT NULL
-        AND     l1.road_id != l2.road_id;
+        FROM    %s int
+        JOIN    %s v1
+                ON  int.id = v1.intersection_id
+        JOIN    %s v2
+                ON  int.id = v2.intersection_id
+        JOIN    %s l1
+                ON  l1.target_node = v1.node_id
+                AND l1.road_id IS NOT NULL
+        JOIN    %s l2
+                ON  l2.source_node = v2.node_id
+                AND l2.road_id IS NOT NULL
+                AND l1.road_id != l2.road_id
+        WHERE   int.id = ANY (%L);
         ',  temptable,
             inttable,
             verttable,
             verttable,
             linktable,
-            linktable);
+            linktable,
+            intersection_ids);
 
     --reposition the azimuths so that the reference azimuth is at 0
     RAISE NOTICE 'repositioning azimuths';
@@ -149,6 +152,9 @@ BEGIN
             linktable,
             linktable,
             linktable);
+
+    --clean up temp table
+    EXECUTE format('DROP TABLE %s', temptable);
 
 RETURN 't';
 END $func$ LANGUAGE plpgsql;

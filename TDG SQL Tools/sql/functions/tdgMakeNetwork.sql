@@ -14,6 +14,7 @@ DECLARE
     inttable text;
     srid int;
     indexcheck TEXT;
+    intersection_ids INT[];
 
 BEGIN
     RAISE NOTICE 'PROCESSING:';
@@ -130,7 +131,6 @@ BEGIN
         EXECUTE format('
             CREATE TABLE %s (   id serial primary key,
                                 road_id INT,
-                                azimuth INT,
                                 source_node INT,
                                 target_node INT,
                                 intersection_id INT,
@@ -527,17 +527,15 @@ BEGIN
     END;
 
 
-    --get turn information
+    --set turn information intersection by intersections
     BEGIN
+        EXECUTE format('SELECT array_agg(id) from %s',inttable) INTO intersection_ids;
         EXECUTE format('
-            UPDATE  %s
-            SET     azimuth = degrees(ST_Azimuth(ST_StartPoint(geom),ST_EndPoint(geom)));
-            ',  linktable);
-        EXECUTE format('
-            SELECT tdgSetTurnInfo(%L,%L,%L);
+            SELECT tdgSetTurnInfo(%L,%L,%L,%L);
             ',  linktable,
                 inttable,
-                verttable);
+                verttable,
+                intersection_ids);
     END;
 
     BEGIN

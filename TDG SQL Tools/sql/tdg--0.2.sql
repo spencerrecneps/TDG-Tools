@@ -388,6 +388,15 @@ BEGIN
 
 RETURN 't';
 END $func$ LANGUAGE plpgsql;
+CREATE OR REPLACE FUNCTION tdgUpdateNetwork (input_table REGCLASS, rowids INT[])
+RETURNS BOOLEAN AS $func$
+
+DECLARE
+
+BEGIN
+
+RETURN 't';
+END $func$ LANGUAGE plpgsql;
 CREATE OR REPLACE FUNCTION tdgMakeRouter (input_table REGCLASS)
 RETURNS BOOLEAN AS $func$
 
@@ -490,6 +499,7 @@ DECLARE
     inttable text;
     srid int;
     indexcheck TEXT;
+    intersection_ids INT[];
 
 BEGIN
     RAISE NOTICE 'PROCESSING:';
@@ -606,7 +616,6 @@ BEGIN
         EXECUTE format('
             CREATE TABLE %s (   id serial primary key,
                                 road_id INT,
-                                azimuth INT,
                                 source_node INT,
                                 target_node INT,
                                 intersection_id INT,
@@ -1003,17 +1012,15 @@ BEGIN
     END;
 
 
-    --get turn information
+    --set turn information intersection by intersections
     BEGIN
+        EXECUTE format('SELECT array_agg(id) from %s',inttable) INTO intersection_ids;
         EXECUTE format('
-            UPDATE  %s
-            SET     azimuth = degrees(ST_Azimuth(ST_StartPoint(geom),ST_EndPoint(geom)));
-            ',  linktable);
-        EXECUTE format('
-            SELECT tdgSetTurnInfo(%L,%L,%L);
+            SELECT tdgSetTurnInfo(%L,%L,%L,%L);
             ',  linktable,
                 inttable,
-                verttable);
+                verttable,
+                intersection_ids);
     END;
 
     BEGIN
@@ -1025,7 +1032,8 @@ RETURN 't';
 END $func$ LANGUAGE plpgsql;
 CREATE OR REPLACE FUNCTION tdgSetTurnInfo ( linktable REGCLASS,
                                             inttable REGCLASS,
-                                            verttable REGCLASS)
+                                            verttable REGCLASS,
+                                            intersection_ids INT[])
 RETURNS BOOLEAN AS $func$
 
 DECLARE
@@ -1056,24 +1064,26 @@ BEGIN
                 l2.id,
                 degrees(ST_Azimuth(ST_StartPoint(l1.geom),ST_EndPoint(l1.geom))),
                 degrees(ST_Azimuth(ST_StartPoint(l2.geom),ST_EndPoint(l2.geom)))
-        FROM    %s int,
-                %s v1,
-                %s v2,
-                %s l1,
-                %s l2
-        WHERE   int.id = v1.intersection_id
-        AND     int.id = v2.intersection_id
-        AND     l1.target_node = v1.node_id
-        AND     l2.source_node = v2.node_id
-        AND     l1.road_id IS NOT NULL
-        AND     l2.road_id IS NOT NULL
-        AND     l1.road_id != l2.road_id;
+        FROM    %s int
+        JOIN    %s v1
+                ON  int.id = v1.intersection_id
+        JOIN    %s v2
+                ON  int.id = v2.intersection_id
+        JOIN    %s l1
+                ON  l1.target_node = v1.node_id
+                AND l1.road_id IS NOT NULL
+        JOIN    %s l2
+                ON  l2.source_node = v2.node_id
+                AND l2.road_id IS NOT NULL
+                AND l1.road_id != l2.road_id
+        WHERE   int.id = ANY (%L);
         ',  temptable,
             inttable,
             verttable,
             verttable,
             linktable,
-            linktable);
+            linktable,
+            intersection_ids);
 
     --reposition the azimuths so that the reference azimuth is at 0
     RAISE NOTICE 'repositioning azimuths';
@@ -1174,6 +1184,9 @@ BEGIN
             linktable,
             linktable,
             linktable);
+
+    --clean up temp table
+    EXECUTE format('DROP TABLE %s', temptable);
 
 RETURN 't';
 END $func$ LANGUAGE plpgsql;
