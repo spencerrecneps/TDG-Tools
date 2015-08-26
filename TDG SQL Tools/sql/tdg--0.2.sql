@@ -551,6 +551,85 @@ BEGIN
 RETURN 't';
 END $func$ LANGUAGE plpgsql;
 ALTER FUNCTION tdgTableCheck(REGCLASS) OWNER TO gis;
+-- CREATE OR REPLACE FUNCTION tdgShortestPath (_linktable REGCLASS,
+--                                             _verttable REGCLASS,
+--                                             _fromGeom geometry,
+--                                             _toGeom geometry,
+--                                             _stress INT DEFAULT NULL)
+-- RETURNS TABLE ( link_id INT,
+--                 vert_id INT,
+--                 road_id INT,
+--                 int_id INT,
+--                 move_cost INT) AS $$
+--
+--
+-- --needs to create temporary vertices table with added verts to represent
+-- --the from/to points. then pass the temp tables to
+-- --tdgShortestPathVerts
+--
+-- RETURN ([1,2,3,4,5],[6,5,4,3,2])
+--
+-- $$ LANGUAGE plpgsql;
+-- ALTER FUNCTION tdgShortestPath(REGCLASS,REGCLASS,geometry,geometry,INT) OWNER TO gis;
+CREATE OR REPLACE FUNCTION tdgShortestPath (_linktable REGCLASS,
+                                            _verttable REGCLASS,
+                                            _from INT,
+                                            _to INT,
+                                            _stress INT DEFAULT NULL)
+RETURNS TABLE ( link_id INT,
+                vert_id INT,
+                road_id INT,
+                int_id INT,
+                move_cost INT) AS $$
+
+import networkx as nx
+
+# check node existence
+qc = plpy.execute('SELECT EXISTS (SELECT 1 FROM %s WHERE node_id = %s)' % (_verttable,_from))
+if not qc[0]['exists']:
+    plpy.error('From vertex does not exist.')
+qc = plpy.execute('SELECT EXISTS (SELECT 1 FROM %s WHERE node_id = %s)' % (_verttable,_to))
+if not qc[0]['exists']:
+    plpy.error('To vertex does not exist.')
+
+# create the graph
+DG=nx.DiGraph()
+
+# read input stress
+stress = 99
+if not _stress is None:
+    stress = _stress
+
+# edges first
+edges = plpy.execute('SELECT * FROM %s;' % _linktable)
+for e in edges:
+    DG.add_edge(e['source_node'],
+                e['target_node'],
+                weight=max(e['link_cost'],0),
+                stress=min(e['link_stress'],99),
+                road_id=e['road_id'])
+
+# then vertices
+verts = plpy.execute('SELECT * FROM %s;' % _verttable)
+for v in verts:
+    vid = v['node_id']
+    #DG[vid]['weight'] = max(v['node_cost'],0)
+    DG[vid]['intersection_id'] = v['intersection_id']
+
+
+# get the shortest path
+plpy.info('Checking for path existence')
+if nx.has_path(DG,source=_from,target=_to):
+    plpy.info('Path found')
+    shortestPath = nx.shortest_path(DG,source=_from,target=_to,weight='weight')
+else:
+    plpy.error('No path between given vertices')
+
+
+return ([1,2,3,4,5],[6,5,4,3,2])
+
+$$ LANGUAGE plpythonu;
+ALTER FUNCTION tdgShortestPath(REGCLASS,REGCLASS,INT,INT,INT) OWNER TO gis;
 CREATE OR REPLACE FUNCTION tdgUpdateNetwork (input_table REGCLASS, rowids INT[])
 RETURNS BOOLEAN AS $func$
 
@@ -1417,61 +1496,32 @@ BEGIN
 RETURN 't';
 END $func$ LANGUAGE plpgsql;
 ALTER FUNCTION tdgGenerateIntersectionStreets(REGCLASS, INT[]) OWNER TO gis;
-CREATE OR REPLACE FUNCTION tdgShortestPath (input_table REGCLASS,
-                                            _stress INT DEFAULT NULL)
-RETURNS TABLE ( link_id INT,
-                vert_id INT,
-                road_id INT,
-                int_id INT,
-                move_cost INT) AS $$
+CREATE OR REPLACE FUNCTION myfunction ( _a REGCLASS,
+                                        _b REGCLASS,
+                                        _foo INT,
+                                        _c INT,
+                                        _d INT DEFAULT NULL)
+RETURNS TABLE ( col_a INT,
+                col_b INT,
+                col_c INT,
+                col_d INT,
+                col_e INT) AS $$
+
+plpy.execute('SELECT 1 FROM %s WHERE %s = 1' % (_a, _foo))
+
+
 
 # read input stress
 stress = 99
-if not _stress is None:
-    stress = _stress
-
-# get table names
-verttable = input_table + '_net_vert'
-linktable = input_table + '_net_link'
-
-# check tables
-if not plpy.execute('SELECT tdgTableCheck(%s);' % plpy.quote_literal(verttable)):
-    # this error isn't working properly. need to improve error catching
-    # generally.
-    plpy.error('No vertex table found. Please create network first.')
-
-
-# if all is well, proceed
-import networkx as nx
-DG=nx.DiGraph()
-
-# edges first
-edges = plpy.execute('SELECT * FROM %s;' % linktable)
-for e in edges:
-    DG.add_edge(e['node_source'],
-                e['node_target'],
-                weight=e['link_cost'],
-                stress=e['link_stress'],
-                road_id=e['road_id'])
-
-# then vertices
-verts = plpy.execute('SELECT * FROM %s;' % verttable)
-for v in verts:
-    vid = v['node_id']
-    DG[vid]['weight'] = v['node_cost']
-    DG[vid]['intersection_id'] = v['intersection_id']
-
-#plpy.execute("UPDATE tbl SET %s = %s WHERE key = %s" % (
-#    plpy.quote_ident(colname),
-#    plpy.quote_nullable(newvalue),
-#    plpy.quote_literal(keyvalue)))
+if not _d is None:
+    stress = d
 
 
 
 return ([1,2,3,4,5],[6,5,4,3,2])
 
 $$ LANGUAGE plpythonu;
-ALTER FUNCTION tdgShortestPath(REGCLASS,INT) OWNER TO gis;
+ALTER FUNCTION myfunction(REGCLASS,REGCLASS,INT,INT,INT) OWNER TO gis;
 CREATE OR REPLACE FUNCTION tdgGetSRID(input_table REGCLASS,geom_name TEXT)
 RETURNS INT AS $func$
 
