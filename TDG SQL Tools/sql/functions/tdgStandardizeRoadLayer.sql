@@ -146,22 +146,22 @@ BEGIN
         query := query || ') SELECT ST_SnapToGrid(r.geom,2)';
         query := query || ',' || quote_literal(tabname);
         IF name_field IS NOT NULL THEN
-            query := query || ',' || name_field;
+            query := query || ',' || quote_ident(name_field);
             END IF;
         IF id_field IS NOT NULL THEN
-            query := query || ',' || id_field;
+            query := query || ',' || quote_ident(id_field);
             END IF;
         IF func_field IS NOT NULL THEN
-            query := query || ',' || func_field;
+            query := query || ',' || quote_ident(func_field);
             END IF;
         IF oneway_field IS NOT NULL THEN
-            query := query || ',' || oneway_field;
+            query := query || ',' || quote_ident(oneway_field);
             END IF;
         IF speed_field IS NOT NULL THEN
-            query := query || ',' || speed_field;
+            query := query || ',' || quote_ident(speed_field);
             END IF;
         IF adt_field IS NOT NULL THEN
-            query := query || ',' || adt_field;
+            query := query || ',' || quote_ident(adt_field);
             END IF;
         query := query || ' FROM ' ||tabname|| ' r';
 
