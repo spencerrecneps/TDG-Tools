@@ -196,7 +196,7 @@ BEGIN
             SELECT      id,
                         %L,
                         ST_StartPoint(geom),
-                        ST_LineInterpolatePoint(s.geom,LEAST(0.5*ST_Length(s.geom)-5,50.0)/ST_Length(s.geom))
+                        ST_LineInterpolatePoint(s.geom,LEAST(0.5*ST_Length(s.geom)-5,4)/ST_Length(s.geom))
             FROM        %s s
             ORDER BY    id ASC;
             ',  'f',
@@ -207,7 +207,7 @@ BEGIN
             SELECT      id,
                         %L,
                         ST_EndPoint(geom),
-                        ST_LineInterpolatePoint(s.geom,GREATEST(0.5*ST_Length(s.geom)+5,ST_Length(s.geom)-50)/ST_Length(s.geom))
+                        ST_LineInterpolatePoint(s.geom,GREATEST(0.5*ST_Length(s.geom)+5,ST_Length(s.geom)-4)/ST_Length(s.geom))
             FROM        %s s
             ORDER BY    id ASC;
             ',  't',
