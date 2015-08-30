@@ -847,35 +847,6 @@ BEGIN
     END;
 
 
-    --indexes
-    BEGIN
-        RAISE NOTICE 'creating indexes';
-        EXECUTE format('
-            CREATE INDEX %s ON %s USING gist (geom);
-            CREATE INDEX %s ON %s (intersection_id);
-            CREATE INDEX %s ON %s (road_id);
-            CREATE INDEX %s ON %s (direction);
-            CREATE INDEX %s ON %s (source_node,target_node);
-            ',  'sidx_' || table_name || 'vert_geom',
-                verttable,
-                'idx_' || table_name || 'vert_intid',
-                verttable,
-                'idx_' || table_name || '_link_road_id',
-                linktable,
-                'idx_' || table_name || '_link_direction',
-                linktable,
-                'idx_' || table_name || '_link_src_trgt',
-                linktable);
-        EXECUTE format('SELECT to_regclass(%L)', quote_literal(schema_name||'.idx_'||table_name||'_srctrgt')) INTO indexcheck;
-        IF indexcheck IS NOT NULL THEN
-            EXECUTE format('
-                CREATE INDEX %s ON %s (source,target);
-                ',  'idx_' || table_name || '_srctrgt',
-                    sourcetable);
-        END IF;
-    END;
-
-
     --create temporary table of all possible vertices
     EXECUTE format('
         CREATE TEMP TABLE v (   id SERIAL PRIMARY KEY,
@@ -899,7 +870,7 @@ BEGIN
             SELECT      id,
                         %L,
                         ST_StartPoint(geom),
-                        ST_LineInterpolatePoint(s.geom,LEAST(0.5*ST_Length(s.geom)-5,50.0)/ST_Length(s.geom))
+                        ST_LineInterpolatePoint(s.geom,LEAST(0.5*ST_Length(s.geom)-2,4)/ST_Length(s.geom))
             FROM        %s s
             ORDER BY    id ASC;
             ',  'f',
@@ -910,7 +881,7 @@ BEGIN
             SELECT      id,
                         %L,
                         ST_EndPoint(geom),
-                        ST_LineInterpolatePoint(s.geom,GREATEST(0.5*ST_Length(s.geom)+5,ST_Length(s.geom)-50)/ST_Length(s.geom))
+                        ST_LineInterpolatePoint(s.geom,GREATEST(0.5*ST_Length(s.geom)+2,ST_Length(s.geom)-4)/ST_Length(s.geom))
             FROM        %s s
             ORDER BY    id ASC;
             ',  't',
@@ -952,6 +923,19 @@ BEGIN
                 inttable);
     END;
 
+    --vertex indexes
+    BEGIN
+        RAISE NOTICE 'creating vertex indexes';
+        EXECUTE format('
+            CREATE INDEX %s ON %s USING gist (geom);
+            CREATE INDEX %s ON %s (intersection_id);
+            ',  'sidx_' || table_name || 'vert_geom',
+                verttable,
+                'idx_' || table_name || 'vert_intid',
+                verttable);
+    END;
+
+    EXECUTE format('ANALYZE %s;', verttable);
 
     --join back the vertices to v
     BEGIN
@@ -998,20 +982,20 @@ BEGIN
                             END AS t_point,
                     vf.int_id,
                     vt.int_id
-            FROM    %s s,
-                    v vf,
-                    %s f_int,
-                    v vt,
-                    %s t_int
-            WHERE   s.id = vf.road_id AND vf.loc = %L
-            AND     vf.int_id = f_int.id
-            AND     s.id = vt.road_id AND vt.loc = %L
-            AND     vt.int_id = t_int.id;
+            FROM    %s s
+            JOIN    v vf
+                    ON s.id = vf.road_id AND vf.loc = %L
+            JOIN    %s f_int
+                    ON vf.int_id = f_int.id
+            JOIN    v vt
+                    ON s.id = vt.road_id AND vt.loc = %L
+            JOIN    %s t_int
+                    ON vt.int_id = t_int.id;
             ',  input_table,
-                inttable,
-                inttable,
                 'f',
-                't');
+                inttable,
+                't',
+                inttable);
 
         --links - self segment ft
         EXECUTE format('
@@ -1054,109 +1038,7 @@ BEGIN
                 'tf',
                 sourcetable,
                 'tf');
-        --
-        -- --from end to start
-        -- EXECUTE format('
-        --     INSERT INTO %s (geom,
-        --                     direction,
-        --                     intersection_id)
-        --     SELECT  ST_Makeline(fl.t_point,tl.f_point),
-        --             %L,
-        --             fl.t_int_id
-        --     FROM    %s f,
-        --             %s t,
-        --             lengths fl,
-        --             lengths tl
-        --     WHERE   f.id != t.id
-        --     AND     f.target = t.source
-        --     AND     f.id = fl.id
-        --     AND     t.id = tl.id
-        --     AND     (f.one_way IS NULL OR f.one_way = %L)
-        --     AND     (t.one_way IS NULL OR t.one_way = %L);
-        --     ',  linktable,
-        --         'ft',
-        --         sourcetable,
-        --         sourcetable,
-        --         'ft',
-        --         'ft');
-        --
-        -- --from end to end
-        -- EXECUTE format('
-        --     INSERT INTO %s (geom,
-        --                     direction,
-        --                     intersection_id)
-        --     SELECT  ST_Makeline(fl.t_point,tl.t_point),
-        --             %L,
-        --             fl.t_int_id
-        --     FROM    %s f,
-        --             %s t,
-        --             lengths fl,
-        --             lengths tl
-        --     WHERE   f.id != t.id
-        --     AND     f.target = t.target
-        --     AND     f.id = fl.id
-        --     AND     t.id = tl.id
-        --     AND     (f.one_way IS NULL OR f.one_way = %L)
-        --     AND     (t.one_way IS NULL OR t.one_way = %L);
-        --     ',  linktable,
-        --         'ft',
-        --         sourcetable,
-        --         sourcetable,
-        --         'ft',
-        --         'tf');
-        --
-        -- --from start to end
-        -- EXECUTE format('
-        --     INSERT INTO %s (geom,
-        --                     direction,
-        --                     intersection_id)
-        --     SELECT  ST_Makeline(fl.f_point,tl.t_point),
-        --             %L,
-        --             fl.f_int_id
-        --     FROM    %s f,
-        --             %s t,
-        --             lengths fl,
-        --             lengths tl
-        --     WHERE   f.id != t.id
-        --     AND     f.source = t.target
-        --     AND     f.id = fl.id
-        --     AND     t.id = tl.id
-        --     AND     (f.one_way IS NULL OR f.one_way = %L)
-        --     AND     (t.one_way IS NULL OR t.one_way = %L);
-        --     ',  linktable,
-        --         'ft',
-        --         sourcetable,
-        --         sourcetable,
-        --         'tf',
-        --         'tf');
-        --
-        -- --from start to start
-        -- EXECUTE format('
-        --     INSERT INTO %s (geom,
-        --                     direction,
-        --                     intersection_id)
-        --     SELECT  ST_Makeline(fl.f_point,tl.f_point),
-        --             %L,
-        --             fl.f_int_id
-        --     FROM    %s f,
-        --             %s t,
-        --             lengths fl,
-        --             lengths tl
-        --     WHERE   f.id != t.id
-        --     AND     f.source = t.source
-        --     AND     f.id = fl.id
-        --     AND     t.id = tl.id
-        --     AND     (f.one_way IS NULL OR f.one_way = %L)
-        --     AND     (t.one_way IS NULL OR t.one_way = %L);
-        --     ',  linktable,
-        --         'ft',
-        --         sourcetable,
-        --         sourcetable,
-        --         'tf',
-        --         'ft');
-
     END;
-
 
     --set source/target info
     BEGIN
@@ -1197,7 +1079,6 @@ BEGIN
 
 
     --populate connector links
-    --NOT GETTING INTERSECTION ID
     BEGIN
         EXECUTE format('
             INSERT INTO %s (geom,
@@ -1241,8 +1122,23 @@ BEGIN
                 intersection_ids);
     END;
 
+
+    --link indexes
     BEGIN
-        EXECUTE format('ANALYZE %s;', verttable);
+        RAISE NOTICE 'creating link indexes';
+        EXECUTE format('
+            CREATE INDEX %s ON %s (road_id);
+            CREATE INDEX %s ON %s (direction);
+            CREATE INDEX %s ON %s (source_node,target_node);
+            ',  'idx_' || table_name || '_link_road_id',
+                linktable,
+                'idx_' || table_name || '_link_direction',
+                linktable,
+                'idx_' || table_name || '_link_src_trgt',
+                linktable);
+    END;
+
+    BEGIN
         EXECUTE format('ANALYZE %s;', linktable);
         EXECUTE format('ANALYZE %s;', turnrestricttable);
     END;
@@ -1397,22 +1293,22 @@ BEGIN
         query := query || ') SELECT ST_SnapToGrid(r.geom,2)';
         query := query || ',' || quote_literal(tabname);
         IF name_field IS NOT NULL THEN
-            query := query || ',' || name_field;
+            query := query || ',' || quote_ident(name_field);
             END IF;
         IF id_field IS NOT NULL THEN
-            query := query || ',' || id_field;
+            query := query || ',' || quote_ident(id_field);
             END IF;
         IF func_field IS NOT NULL THEN
-            query := query || ',' || func_field;
+            query := query || ',' || quote_ident(func_field);
             END IF;
         IF oneway_field IS NOT NULL THEN
-            query := query || ',' || oneway_field;
+            query := query || ',' || quote_ident(oneway_field);
             END IF;
         IF speed_field IS NOT NULL THEN
-            query := query || ',' || speed_field;
+            query := query || ',' || quote_ident(speed_field);
             END IF;
         IF adt_field IS NOT NULL THEN
-            query := query || ',' || adt_field;
+            query := query || ',' || quote_ident(adt_field);
             END IF;
         query := query || ' FROM ' ||tabname|| ' r';
 
