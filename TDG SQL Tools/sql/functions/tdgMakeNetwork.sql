@@ -399,7 +399,8 @@ BEGIN
             WHERE   v1.node_id != v2.node_id
             AND     v1.intersection_id = v2.intersection_id
             AND     s1.target_node = v1.node_id
-            AND     s2.source_node = v2.node_id;
+            AND     s2.source_node = v2.node_id
+            AND     NOT s1.road_id = s2.road_id;
             ',  linktable,
                 verttable,
                 verttable,
