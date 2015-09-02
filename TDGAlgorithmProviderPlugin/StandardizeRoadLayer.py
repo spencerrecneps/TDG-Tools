@@ -26,7 +26,7 @@ __copyright__ = '(C) 2015, Spencer Gardner'
 __revision__ = '$Format:%H$'
 
 from PyQt4.QtCore import QSettings, QVariant
-from qgis.core import QgsDataSourceURI, QgsVectorLayerImport, QGis, QgsFeature, QgsGeometry
+from qgis.core import *
 
 import processing
 from processing.core.GeoAlgorithm import GeoAlgorithm
@@ -214,22 +214,27 @@ class StandardizeRoadLayer(GeoAlgorithm):
 
         processing.runalg("qgis:postgisexecutesql",database,
             sql)
-"""
+        '''
         sql = 'select tdgGenerateCrossStreetData('
         sql = sql + "'" + tableName + "');"
         processing.runalg("qgis:postgisexecutesql",database,
             sql)
-
+        '''
         if delSource:
             delSql = 'DROP TABLE ' + roadsDb.getTable()
             processing.runalg("qgis:postgisexecutesql",database,
                 delSql)
-        """
-"""
-        # set up the new table's uri and get new object
-        uri = QgsDataSourceURI()
-        uri.setConnection(dbHost, str(dbPort), dbName, dbUser, dbPass)
-        uri.setDataSource(dbSchema, tableName, 'geom', 'id')
 
-        #iface.addVectorLayer(uri.uri(),tableName,'postgres')
-"""
+        # add the roads layer to the map
+        uri = QgsDataSourceURI()
+        uri.setConnection(dbHost,str(dbPort),dbName,dbUser,dbPass)
+        uri.setDataSource(dbSchema,tableName,'geom','','id')
+        layer = QgsVectorLayer(uri.uri(),tableName,'postgres')
+        QgsMapLayerRegistry.instance().addMapLayer(layer)
+
+        # add the intersections layer to the map
+        tableName = tableName + '_intersections'
+        uri.setConnection(dbHost,str(dbPort),dbName,dbUser,dbPass)
+        uri.setDataSource(dbSchema,tableName,'geom','','id')
+        layer = QgsVectorLayer(uri.uri(),tableName,'postgres')
+        QgsMapLayerRegistry.instance().addMapLayer(layer)

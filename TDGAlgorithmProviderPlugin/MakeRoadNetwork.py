@@ -26,7 +26,7 @@ __copyright__ = '(C) 2015, Spencer Gardner'
 __revision__ = '$Format:%H$'
 
 from PyQt4.QtCore import QSettings, QVariant
-from qgis.core import QgsDataSourceURI, QgsVectorLayerImport, QGis, QgsFeature, QgsGeometry
+from qgis.core import *
 
 import processing
 from processing.core.GeoAlgorithm import GeoAlgorithm
@@ -80,6 +80,7 @@ class MakeRoadNetwork(GeoAlgorithm):
         dbUser = roadsDb.getUser()
         dbPass = roadsDb.getPassword()
         dbSchema = roadsDb.getSchema()
+        dbTable = roadsDb.getTable()
         dbType = roadsDb.getType()
         dbSRID = roadsDb.getSRID()
         try:
@@ -105,3 +106,20 @@ class MakeRoadNetwork(GeoAlgorithm):
 
         processing.runalg("qgis:postgisexecutesql",database,
             sql)
+
+
+        # add layers to map
+        linkName = dbTable + '_net_link'
+        vertName = dbTable + '_net_vert'
+        uri = QgsDataSourceURI()
+        uri.setConnection(dbHost,str(dbPort),dbName,dbUser,dbPass)
+
+        # link table
+        uri.setDataSource(dbSchema,linkName,'geom','','id')
+        layer = QgsVectorLayer(uri.uri(),linkName,'postgres')
+        QgsMapLayerRegistry.instance().addMapLayer(layer)
+
+        # vert table
+        uri.setDataSource(dbSchema,vertName,'geom','','id')
+        layer = QgsVectorLayer(uri.uri(),vertName,'postgres')
+        QgsMapLayerRegistry.instance().addMapLayer(layer)

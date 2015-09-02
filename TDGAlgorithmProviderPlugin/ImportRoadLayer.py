@@ -26,8 +26,7 @@ __copyright__ = '(C) 2015, Spencer Gardner'
 __revision__ = '$Format:%H$'
 
 from PyQt4.QtCore import QSettings
-from qgis.core import QgsDataSourceURI, QgsVectorLayerImport, QGis, QgsFeature
-from qgis.core import QgsGeometry, QgsCoordinateReferenceSystem, QgsCoordinateTransform
+from qgis.core import *
 
 import processing
 from processing.core.GeoAlgorithm import GeoAlgorithm
@@ -151,8 +150,8 @@ class ImportRoadLayer(GeoAlgorithm):
         # set up the new table's uri
         uri = QgsDataSourceURI()
         uri.setConnection(host, str(port), database, username, password)
-        uri.setDataSource('tdg', table, 'geom', 'id')
 
+        uri.setDataSource('tdg', table, 'geom', '', 'id')
         # set up inputs for the new table to be created
         fields = roadsLayer.dataProvider().fields()
         geomType = QGis.WKBLineString
@@ -188,6 +187,10 @@ class ImportRoadLayer(GeoAlgorithm):
         del outLayer
         db.create_spatial_index(table, 'tdg', 'geom')
         db.vacuum_analyze(table, 'tdg')
+
+        # add new table to map
+        layer = QgsVectorLayer(uri.uri(),table,'postgres')
+        QgsMapLayerRegistry.instance().addMapLayer(layer)
 
     def extractAsSingle(self, geom):
         multiGeom = QgsGeometry()
