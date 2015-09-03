@@ -202,6 +202,17 @@ BEGIN
         PERFORM tdgMakeIntersections(outtabname::REGCLASS);
     END;
 
+    --triggers
+    BEGIN
+        EXECUTE format('
+            CREATE TRIGGER tdg%sGeomIntersections
+                AFTER UPDATE OF geom ON %s
+                FOR EACH ROW
+                EXECUTE PROCEDURE tdgUpdateIntersections();
+            ',  output_table,
+                output_table);
+    END;
+
     RETURN 't';
 END $func$ LANGUAGE plpgsql;
 ALTER FUNCTION tdgStandardizeRoadLayer( REGCLASS,TEXT,TEXT,TEXT,TEXT,TEXT,

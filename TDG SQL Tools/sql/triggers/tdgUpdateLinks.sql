@@ -1,0 +1,20 @@
+CREATE OR REPLACE FUNCTION tdgUpdateLinks ()
+RETURNS TRIGGER
+AS $BODY$
+
+DECLARE
+    linktable TEXT;
+
+BEGIN
+    IF (TG_OP = 'UPDATE') THEN
+
+    ELSIF (TG_OP = 'DELETE') THEN
+
+    ELSIF (TG_OP = 'INSERT') THEN
+
+    END IF;
+
+    RETURN NULL;
+END;
+$BODY$ LANGUAGE plpgsql;
+ALTER FUNCTION tdgMakeIntersections(REGCLASS) OWNER TO gis;
