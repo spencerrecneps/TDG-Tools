@@ -17,3 +17,5 @@ VALUES  (25,3,1),
         (99,3,3),
         (99,5,4),
         (99,99,4);
+
+GRANT ALL ON TABLE tdg.stress_cross_no_median TO public;

@@ -31,3 +31,5 @@ VALUES  (20,99,1,1),
         (99,13,1,4),
         (99,99,99,3),
         (99,14,99,4);
+
+GRANT ALL ON TABLE tdg.stress_seg_bike_w_park TO public;

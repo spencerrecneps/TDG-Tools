@@ -72,3 +72,5 @@ VALUES  (25,750,0,1),
         (40,999999,99,4),
         (45,999999,99,4),
         (99,999999,99,4);
+
+GRANT ALL ON TABLE tdg.stress_seg_mixed TO public;
