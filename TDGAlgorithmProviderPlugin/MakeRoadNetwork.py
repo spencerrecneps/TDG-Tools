@@ -50,6 +50,7 @@ class MakeRoadNetwork(GeoAlgorithm):
     # calling from the QGIS console.
 
     ROADS_LAYER = 'ROADS_LAYER'
+    ADDTOMAP = 'ADDTOMAP'
 
     def defineCharacteristics(self):
         """Here we define the inputs and output of the algorithm, along
@@ -63,14 +64,19 @@ class MakeRoadNetwork(GeoAlgorithm):
         #self.group = 'Algorithms for vector layers'
         self.group = 'Network Analysis'
 
-        # 1 - Input roads layer. Must be line type
+        # Input roads layer. Must be line type
         # It is a mandatory (not optional) one, hence the False argument
         self.addParameter(ParameterVector(self.ROADS_LAYER,
             self.tr('Base roads layer'), [ParameterVector.VECTOR_TYPE_LINE], optional=False))
 
+        # Add new tables to map?
+        self.addParameter(ParameterBoolean(self.ADDTOMAP,
+            self.tr('Add new tables to map'), True))
+
     def processAlgorithm(self, progress):
         # Retrieve the values of the parameters entered by the user
         inLayer = dataobjects.getObjectFromUri(self.getParameterValue(self.ROADS_LAYER))
+        addToMap = self.getParameterValue(self.ADDTOMAP)
 
         # establish db connection
         roadsDb = LayerDbInfo(inLayer.source())
@@ -109,17 +115,18 @@ class MakeRoadNetwork(GeoAlgorithm):
 
 
         # add layers to map
-        linkName = dbTable + '_net_link'
-        vertName = dbTable + '_net_vert'
-        uri = QgsDataSourceURI()
-        uri.setConnection(dbHost,str(dbPort),dbName,dbUser,dbPass)
+        if addToMap:
+            linkName = dbTable + '_net_link'
+            vertName = dbTable + '_net_vert'
+            uri = QgsDataSourceURI()
+            uri.setConnection(dbHost,str(dbPort),dbName,dbUser,dbPass)
 
-        # link table
-        uri.setDataSource(dbSchema,linkName,'geom','','id')
-        layer = QgsVectorLayer(uri.uri(),linkName,'postgres')
-        QgsMapLayerRegistry.instance().addMapLayer(layer)
+            # link table
+            uri.setDataSource(dbSchema,linkName,'geom','','id')
+            layer = QgsVectorLayer(uri.uri(),linkName,'postgres')
+            QgsMapLayerRegistry.instance().addMapLayer(layer)
 
-        # vert table
-        uri.setDataSource(dbSchema,vertName,'geom','','id')
-        layer = QgsVectorLayer(uri.uri(),vertName,'postgres')
-        QgsMapLayerRegistry.instance().addMapLayer(layer)
+            # vert table
+            uri.setDataSource(dbSchema,vertName,'geom','','id')
+            layer = QgsVectorLayer(uri.uri(),vertName,'postgres')
+            QgsMapLayerRegistry.instance().addMapLayer(layer)

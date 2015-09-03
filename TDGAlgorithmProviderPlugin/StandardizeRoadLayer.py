@@ -59,6 +59,7 @@ class StandardizeRoadLayer(GeoAlgorithm):
     SPEED_FIELD = 'SPEED_FIELD'
     FUNC_FIELD = 'FUNC_FIELD'
     ONEWAY_FIELD = 'ONEWAY_FIELD'
+    ADDTOMAP = 'ADDTOMAP'
     OVERWRITE = 'OVERWRITE'
     DELETE_SOURCE = 'DELETE_SOURCE'
 
@@ -126,6 +127,10 @@ class StandardizeRoadLayer(GeoAlgorithm):
             parent=self.ROADS_LAYER,
             optional=True))
 
+        # Add new table to map?
+        self.addParameter(ParameterBoolean(self.ADDTOMAP,
+            self.tr('Add new table to map'), True))
+
         # Overwrite existing table?
         self.addParameter(ParameterBoolean(self.OVERWRITE,
             self.tr('Overwrite'), default=True))
@@ -144,6 +149,7 @@ class StandardizeRoadLayer(GeoAlgorithm):
         fieldSpeed = self.getParameterValue(self.SPEED_FIELD)
         fieldFunc = self.getParameterValue(self.FUNC_FIELD)
         fieldOneway = self.getParameterValue(self.ONEWAY_FIELD)
+        addToMap = self.getParameterValue(self.ADDTOMAP)
         overwrite = self.getParameterValue(self.OVERWRITE)
         delSource = self.getParameterValue(self.DELETE_SOURCE)
 
@@ -225,16 +231,18 @@ class StandardizeRoadLayer(GeoAlgorithm):
             processing.runalg("qgis:postgisexecutesql",database,
                 delSql)
 
-        # add the roads layer to the map
-        uri = QgsDataSourceURI()
-        uri.setConnection(dbHost,str(dbPort),dbName,dbUser,dbPass)
-        uri.setDataSource(dbSchema,tableName,'geom','','id')
-        layer = QgsVectorLayer(uri.uri(),tableName,'postgres')
-        QgsMapLayerRegistry.instance().addMapLayer(layer)
+        # add layers to map
+        if addToMap:
+            # add roads layer
+            uri = QgsDataSourceURI()
+            uri.setConnection(dbHost,str(dbPort),dbName,dbUser,dbPass)
+            uri.setDataSource(dbSchema,tableName,'geom','','id')
+            layer = QgsVectorLayer(uri.uri(),tableName,'postgres')
+            QgsMapLayerRegistry.instance().addMapLayer(layer)
 
-        # add the intersections layer to the map
-        tableName = tableName + '_intersections'
-        uri.setConnection(dbHost,str(dbPort),dbName,dbUser,dbPass)
-        uri.setDataSource(dbSchema,tableName,'geom','','id')
-        layer = QgsVectorLayer(uri.uri(),tableName,'postgres')
-        QgsMapLayerRegistry.instance().addMapLayer(layer)
+            # add the intersections layer
+            tableName = tableName + '_intersections'
+            uri.setConnection(dbHost,str(dbPort),dbName,dbUser,dbPass)
+            uri.setDataSource(dbSchema,tableName,'geom','','id')
+            layer = QgsVectorLayer(uri.uri(),tableName,'postgres')
+            QgsMapLayerRegistry.instance().addMapLayer(layer)

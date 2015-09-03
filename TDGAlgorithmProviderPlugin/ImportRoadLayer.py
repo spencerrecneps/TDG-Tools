@@ -54,6 +54,7 @@ class ImportRoadLayer(GeoAlgorithm):
     ROADS_LAYER = 'ROADS_LAYER'
     DATABASE = 'DATABASE'
     TABLENAME = 'TABLENAME'
+    ADDTOMAP = 'ADDTOMAP'
     OVERWRITE = 'OVERWRITE'
     TARGET_CRS = 'TARGET_CRS'
 
@@ -74,34 +75,38 @@ class ImportRoadLayer(GeoAlgorithm):
         #self.group = 'Algorithms for vector layers'
         self.group = 'Network Analysis'
 
-        # 1 - Input roads layer. Must be line type
+        # Input roads layer. Must be line type
         # It is a mandatory (not optional) one, hence the False argument
         self.addParameter(ParameterVector(self.ROADS_LAYER,
             self.tr('Roads layer'), [ParameterVector.VECTOR_TYPE_LINE], False))
 
-        # 2 - DB connection
+        # DB connection
         self.DB_CONNECTIONS = self.dbConnectionNames()
         self.addParameter(ParameterSelection(self.DATABASE,
             self.tr('Database (connection name)'), self.DB_CONNECTIONS))
 
-        # 3 - Table name
+        # Table name
         self.addParameter(ParameterString(self.TABLENAME,
             self.tr('Table name to import to (leave blank to use layer name)')))
 
-        # 4 - Overwrite existing table?
+        # Add new table to map?
+        self.addParameter(ParameterBoolean(self.ADDTOMAP,
+            self.tr('Add new table to map'), True))
+
+        # Overwrite existing table?
         self.addParameter(ParameterBoolean(self.OVERWRITE,
             self.tr('Overwrite'), True))
 
-        # 5 - CRS
+        # CRS
         self.addParameter(ParameterCrs(self.TARGET_CRS,
             self.tr('Target CRS'), 'EPSG:4326'))
 
     def processAlgorithm(self, progress):
         # Retrieve the values of the parameters entered by the user
-        # 1 - roads layer
+        # roads layer
         roadsLayer = dataobjects.getObjectFromUri(self.getParameterValue(self.ROADS_LAYER))
 
-        # 2 - db connection
+        # db connection
         connection = self.DB_CONNECTIONS[self.getParameterValue(self.DATABASE)]
         settings = QSettings()
         mySettings = '/PostgreSQL/connections/' + connection
@@ -115,7 +120,7 @@ class ImportRoadLayer(GeoAlgorithm):
             raise GeoAlgorithmExecutionException(
                 self.tr('Bad database connection name: %s' % connection))
 
-        # 3 - table name
+        # table name
         table = self.getParameterValue(self.TABLENAME).strip().lower()
         if table is None or len(table) < 1:
             table = roadsLayer.name().lower()
@@ -130,10 +135,13 @@ class ImportRoadLayer(GeoAlgorithm):
             raise GeoAlgorithmExecutionException(
                 self.tr("Couldn't connect to database:\n%s" % e.message))
 
-        # 4 - Overwrite
+        # Add to map
+        addToMap = self.getParameterValue(self.ADDTOMAP)
+
+        # Overwrite
         overwrite = self.getParameterValue(self.OVERWRITE)
 
-        # 5 - Target CRS
+        # Target CRS
         crsId = self.getParameterValue(self.TARGET_CRS)
         targetCrs = QgsCoordinateReferenceSystem()
         targetCrs.createFromUserInput(crsId)
@@ -189,8 +197,9 @@ class ImportRoadLayer(GeoAlgorithm):
         db.vacuum_analyze(table, 'tdg')
 
         # add new table to map
-        layer = QgsVectorLayer(uri.uri(),table,'postgres')
-        QgsMapLayerRegistry.instance().addMapLayer(layer)
+        if addToMap:
+            layer = QgsVectorLayer(uri.uri(),table,'postgres')
+            QgsMapLayerRegistry.instance().addMapLayer(layer)
 
     def extractAsSingle(self, geom):
         multiGeom = QgsGeometry()
