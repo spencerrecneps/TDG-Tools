@@ -226,7 +226,12 @@ class StandardizeRoadLayer(GeoAlgorithm):
         processing.runalg("qgis:postgisexecutesql",database,
             sql)
         '''
+        mapReg = QgsMapLayerRegistry.instance()
         if delSource:
+            try:
+                mapReg.removeMapLayer(inLayer.id())
+            except:
+                pass
             delSql = 'DROP TABLE ' + roadsDb.getTable()
             processing.runalg("qgis:postgisexecutesql",database,
                 delSql)
@@ -237,12 +242,15 @@ class StandardizeRoadLayer(GeoAlgorithm):
             uri = QgsDataSourceURI()
             uri.setConnection(dbHost,str(dbPort),dbName,dbUser,dbPass)
             uri.setDataSource(dbSchema,tableName,'geom','','id')
+            uri.setSrid(str(dbSRID))
+            uri.setWkbType(QGis.WKBLineString)
             layer = QgsVectorLayer(uri.uri(),tableName,'postgres')
-            QgsMapLayerRegistry.instance().addMapLayer(layer)
+            mapReg.addMapLayer(layer)
 
             # add the intersections layer
             tableName = tableName + '_intersections'
             uri.setConnection(dbHost,str(dbPort),dbName,dbUser,dbPass)
             uri.setDataSource(dbSchema,tableName,'geom','','id')
+            uri.setWkbType(QGis.WKBPoint)
             layer = QgsVectorLayer(uri.uri(),tableName,'postgres')
-            QgsMapLayerRegistry.instance().addMapLayer(layer)
+            mapReg.addMapLayer(layer)

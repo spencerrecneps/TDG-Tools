@@ -160,6 +160,8 @@ class ImportRoadLayer(GeoAlgorithm):
         uri.setConnection(host, str(port), database, username, password)
 
         uri.setDataSource('tdg', table, 'geom', '', 'id')
+        uri.setSrid(str(crsId))
+        uri.setWkbType(QGis.WKBLineString)
         # set up inputs for the new table to be created
         fields = roadsLayer.dataProvider().fields()
         geomType = QGis.WKBLineString

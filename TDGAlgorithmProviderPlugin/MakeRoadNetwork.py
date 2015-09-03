@@ -120,13 +120,16 @@ class MakeRoadNetwork(GeoAlgorithm):
             vertName = dbTable + '_net_vert'
             uri = QgsDataSourceURI()
             uri.setConnection(dbHost,str(dbPort),dbName,dbUser,dbPass)
+            uri.setSrid(str(dbSRID))
 
             # link table
             uri.setDataSource(dbSchema,linkName,'geom','','id')
+            uri.setWkbType(QGis.WKBLineString)
             layer = QgsVectorLayer(uri.uri(),linkName,'postgres')
             QgsMapLayerRegistry.instance().addMapLayer(layer)
 
             # vert table
             uri.setDataSource(dbSchema,vertName,'geom','','id')
+            uri.setWkbType(QGis.WKBPoint)
             layer = QgsVectorLayer(uri.uri(),vertName,'postgres')
             QgsMapLayerRegistry.instance().addMapLayer(layer)
