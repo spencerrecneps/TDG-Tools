@@ -79,6 +79,8 @@ VALUES  (25,750,0,1),
         (40,999999,99,4),
         (45,999999,99,4),
         (99,999999,99,4);
+
+GRANT ALL ON TABLE tdg.stress_seg_mixed TO public;
 CREATE TABLE stress_seg_bike_w_park (
     speed integer,
     bike_park_lane_wd_ft integer,
@@ -112,6 +114,8 @@ VALUES  (20,99,1,1),
         (99,13,1,4),
         (99,99,99,3),
         (99,14,99,4);
+
+GRANT ALL ON TABLE tdg.stress_seg_bike_w_park TO public;
 CREATE TABLE stress_cross_w_median (
     speed integer,
     lanes integer,
@@ -131,6 +135,8 @@ VALUES  (25,3,1),
         (99,3,3),
         (99,5,4),
         (99,99,4);
+
+GRANT ALL ON TABLE tdg.stress_cross_w_median TO public;
 CREATE TABLE stress_seg_bike_no_park (
     speed integer,
     bike_lane_wd_ft integer,
@@ -175,6 +181,8 @@ VALUES  (25,99,1,1),
         (99,5,2,4),
         (99,99,99,4),
         (99,5,99,4);
+
+GRANT ALL ON TABLE tdg.stress_seg_bike_no_park TO public;
 CREATE TABLE stress_cross_no_median (
     speed integer,
     lanes integer,
@@ -194,6 +202,8 @@ VALUES  (25,3,1),
         (99,3,3),
         (99,5,4),
         (99,99,4);
+
+GRANT ALL ON TABLE tdg.stress_cross_no_median TO public;
 CREATE OR REPLACE FUNCTION tdgSetTurnInfo ( linktable REGCLASS,
                                             inttable REGCLASS,
                                             verttable REGCLASS,
