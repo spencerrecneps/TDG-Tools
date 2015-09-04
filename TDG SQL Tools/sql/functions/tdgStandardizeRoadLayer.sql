@@ -67,13 +67,14 @@ BEGIN
                                 road_name TEXT,
                                 road_from TEXT,
                                 road_to TEXT,
+                                intersection_from INT,
+                                intersection_to INT,
                                 source_data TEXT,
                                 source_id TEXT,
                                 functional_class TEXT,
                                 one_way VARCHAR(2),
                                 speed_limit INT,
                                 adt INT,
-                                z_value INT,
                                 ft_seg_lanes_thru INT,
                                 ft_seg_lanes_bike_wd_ft INT,
                                 ft_seg_lanes_park_wd_ft INT,
@@ -111,11 +112,7 @@ BEGIN
                                 tf_cross_speed_limit INT,
                                 tf_cross_lanes INT,
                                 tf_cross_stress_override INT,
-                                tf_cross_stress INT,
-                                source INT,
-                                target INT,
-                                ft_cost INT,
-                                tf_cost INT)
+                                tf_cross_stress INT)
             ',  outtabname,
                 srid);
     END;
@@ -168,22 +165,13 @@ BEGIN
         EXECUTE query;
     END;
 
-    --snap geom to grid to nearest 2 ft
-    BEGIN
-        RAISE NOTICE 'snapping road geometries';
-        EXECUTE format('
-            UPDATE  %s
-            SET     geom = ST_SnapToGrid(geom,2);
-            ',  outtabname);
-    END;
-
     --indexes
     BEGIN
         EXECUTE format('
             CREATE INDEX sidx_%s_geom ON %s USING GIST(geom);
             CREATE INDEX idx_%s_oneway ON %s (one_way);
-            CREATE INDEX idx_%s_zval ON %s (z_value);
-            CREATE INDEX idx_%s_srctrgt ON %s (source,target);
+            CREATE INDEX idx_%s_sourceid ON %s (source_id);
+            CREATE INDEX idx_%s_funcclass ON %s (functional_class);
             ',  output_table,
                 outtabname,
                 output_table,
@@ -202,12 +190,33 @@ BEGIN
         PERFORM tdgMakeIntersections(outtabname::REGCLASS);
     END;
 
+    --intersection indexes
+    BEGIN
+        EXECUTE format('
+            CREATE INDEX idx_%s_intfrom ON %s (intersection_from);
+            CREATE INDEX idx_%s_intto ON %s (intersection_to);
+            ',  output_table,
+                outtabname,
+                output_table,
+                outtabname);
+    END;
+
+    BEGIN
+        EXECUTE format('ANALYZE %s;', output_table);
+    END;
+
     --triggers
     BEGIN
         EXECUTE format('
-            CREATE TRIGGER tdg%sGeomIntersections
+            CREATE TRIGGER tdg%sGeomIntersectionUpdate
                 AFTER UPDATE OF geom ON %s
                 FOR EACH ROW
+                EXECUTE PROCEDURE tdgUpdateIntersections();
+            ',  output_table,
+                output_table);
+        EXECUTE format('
+            CREATE TRIGGER tdg%sGeomIntersectionAdd
+                AFTER UPDATE OF geom ON %s
                 EXECUTE PROCEDURE tdgUpdateIntersections();
             ',  output_table,
                 output_table);

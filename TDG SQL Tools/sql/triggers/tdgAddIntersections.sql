@@ -1,4 +1,4 @@
-CREATE OR REPLACE FUNCTION tdgUpdateIntersections ()
+CREATE OR REPLACE FUNCTION tdgAddIntersections ()
 RETURNS TRIGGER
 AS $BODY$
 
@@ -8,24 +8,29 @@ DECLARE
 BEGIN
     inttable := TG_TABLE_NAME || '_intersections';
 
-    IF (TG_OP = 'UPDATE') THEN
-        --update old geoms of affected roads and intersections
+    '---------------------------------------------'
+    'CHECK INTO "OLD TABLE" AND "NEW TABLE" CLAUSE'
+    '---------------------------------------------'
+
+    IF (TG_OP = 'UPDATE' OR TG_OP = 'INSERT') THEN
+        --create new intersection points
         EXECUTE format('
-            WITH counts AS (SELECT  ints.id id,
-                                    COUNT(roads.id) c
-                            FROM    %s ints
-                            JOIN    TG_TABLE_NAME roads
-                                    ON ints.geom IN (ST_StartPoint(roads.geom), ST_EndPoint(roads.geom))
-                            WHERE   ints.id IN (OLD.intersection_from,OLD.intersection_to))
-            UPDATE  %s
-            SET     legs = counts.c
-            FROM    counts
-            WHERE   %s.id = counts.id;
+            INSERT INTO %s (geom)
+            SELECT  ST_StartPoint(NEW.geom)
+            WHERE   NOT EXISTS (SELECT  1
+                                FROM    %s ints
+                                WHERE   ints.geom = ST_StartPoint(NEW.geom));
+            INSERT INTO %s (geom)
+            SELECT  ST_EndPoint(NEW.geom)
+            WHERE   NOT EXISTS (SELECT  1
+                                FROM    %s ints
+                                WHERE   ints.geom = ST_EndPoint(NEW.geom));
             ',  inttable,
+                inttable,
                 inttable,
                 inttable);
 
-        --check for new geoms
+        --update roads
         EXECUTE format('
 
             ')
@@ -46,16 +51,13 @@ BEGIN
                 input_table,
                 input_table,
                 inttable);
-    ELSIF (TG_OP = 'DELETE') THEN
-
-    ELSIF (TG_OP = 'INSERT') THEN
 
     END IF;
 
     RETURN NULL;
 END;
 $BODY$ LANGUAGE plpgsql;
-ALTER FUNCTION tdgUpdateIntersections() OWNER TO gis;
+ALTER FUNCTION tdgAddIntersections() OWNER TO gis;
 
 
 
