@@ -8,47 +8,46 @@ DECLARE
 BEGIN
     inttable := TG_TABLE_NAME || '_intersections';
 
-    IF (TG_OP = 'UPDATE') THEN
-        --update old geoms of affected roads and intersections
-        EXECUTE format('
-            WITH counts AS (SELECT  ints.id id,
-                                    COUNT(roads.id) c
-                            FROM    %s ints
-                            JOIN    TG_TABLE_NAME roads
-                                    ON ints.geom IN (ST_StartPoint(roads.geom), ST_EndPoint(roads.geom))
-                            WHERE   ints.id IN (OLD.intersection_from,OLD.intersection_to))
-            UPDATE  %s
-            SET     legs = counts.c
-            FROM    counts
-            WHERE   %s.id = counts.id;
-            ',  inttable,
-                inttable,
-                inttable);
+    IF (TG_OP = 'UPDATE' OR TG_OP = 'INSERT') THEN
 
-        --check for new geoms
-        EXECUTE format('
+        --create new intersection point at road startpoint (if applicable)
+        EXECUTE '   INSERT INTO ' || inttable || '(geom)
+                    SELECT  ST_StartPoint($2.geom)
+                    WHERE   NOT EXISTS (SELECT  1
+                                        FROM    ' || inttable || ' ints
+                                        WHERE   ints.geom = ST_StartPoint($2.geom));'
+        USING   NEW,
+                NEW;
 
-            ')
+        --update road with new intersection point
+        EXECUTE '
+            SELECT  id
+            FROM '  || inttable || ' ints
+            WHERE   ints.geom = ST_StartPoint($1.geom);
+            '
+        INTO NEW.intersection_from
+        USING NEW;
 
 
-        --delete intersections with 0 legs
+        --create new intersection point at road endpoint (if applicable)
+        EXECUTE '   INSERT INTO ' || inttable || '(geom)
+                    SELECT  ST_EndPoint($2.geom)
+                    WHERE   NOT EXISTS (SELECT  1
+                                        FROM    ' || inttable || ' ints
+                                        WHERE   ints.geom = ST_EndPoint($2.geom));'
+        USING   NEW,
+                NEW;
 
-        EXECUTE format('
-            CREATE TEMP TABLE v (i INT, geom geometry(point,%L)) ON COMMIT DROP;
-            INSERT INTO v (i, geom) SELECT id, ST_StartPoint(geom) FROM %s ORDER BY id ASC;
-            INSERT INTO v (i, geom) SELECT id, ST_EndPoint(geom) FROM %s ORDER BY id ASC;
-            INSERT INTO %s (legs, geom)
-            SELECT      COUNT(i),
-                        geom
-            FROM        v
-            GROUP BY    geom;
-            ',  srid,
-                input_table,
-                input_table,
-                inttable);
-    ELSIF (TG_OP = 'DELETE') THEN
+        --update road with new intersection point
+        EXECUTE '
+            SELECT  id
+            FROM '  || inttable || ' ints
+            WHERE   ints.geom = ST_EndPoint($1.geom);
+            '
+        INTO NEW.intersection_to
+        USING NEW;
 
-    ELSIF (TG_OP = 'INSERT') THEN
+    ELSIF TG_OP = 'DELETE' THEN
 
     END IF;
 

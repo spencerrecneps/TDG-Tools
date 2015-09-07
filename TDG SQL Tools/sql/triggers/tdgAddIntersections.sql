@@ -8,49 +8,44 @@ DECLARE
 BEGIN
     inttable := TG_TABLE_NAME || '_intersections';
 
-    '---------------------------------------------'
-    'CHECK INTO "OLD TABLE" AND "NEW TABLE" CLAUSE'
-    '---------------------------------------------'
-
     IF (TG_OP = 'UPDATE' OR TG_OP = 'INSERT') THEN
-        --create new intersection points
+        --create new intersection point at road startpoint (if applicable)
+        EXECUTE format('
+            INSERT INTO %s (geom)
+            SELECT  ST_StartPoint(newrow.geom)
+            FROM (SELECT NEW.*) AS newrow
+            WHERE   NOT EXISTS (SELECT  1
+                                FROM    %s ints
+                                WHERE   ints.geom = ST_StartPoint(newrow.geom));
+            ',  inttable,
+                inttable);
+
+        --update road with new intersection point
+        EXECUTE format('
+            SELECT  id
+            FROM    %s
+            WHERE   %s.geom = ST_StartPoint(NEW.geom);
+            ') INTO NEW.intersection_from;
+
+
+        --create new intersection point at road endpoint (if applicable)
         EXECUTE format('
             INSERT INTO %s (geom)
             SELECT  ST_StartPoint(NEW.geom)
             WHERE   NOT EXISTS (SELECT  1
                                 FROM    %s ints
-                                WHERE   ints.geom = ST_StartPoint(NEW.geom));
-            INSERT INTO %s (geom)
-            SELECT  ST_EndPoint(NEW.geom)
-            WHERE   NOT EXISTS (SELECT  1
-                                FROM    %s ints
                                 WHERE   ints.geom = ST_EndPoint(NEW.geom));
             ',  inttable,
-                inttable,
-                inttable,
                 inttable);
 
-        --update roads
+        --update road with new intersection point
         EXECUTE format('
+            SELECT  id
+            FROM    %s
+            WHERE   %s.geom = ST_EndPoint(NEW.geom);
+            ') INTO NEW.intersection_to;
 
-            ')
-
-
-        --delete intersections with 0 legs
-
-        EXECUTE format('
-            CREATE TEMP TABLE v (i INT, geom geometry(point,%L)) ON COMMIT DROP;
-            INSERT INTO v (i, geom) SELECT id, ST_StartPoint(geom) FROM %s ORDER BY id ASC;
-            INSERT INTO v (i, geom) SELECT id, ST_EndPoint(geom) FROM %s ORDER BY id ASC;
-            INSERT INTO %s (legs, geom)
-            SELECT      COUNT(i),
-                        geom
-            FROM        v
-            GROUP BY    geom;
-            ',  srid,
-                input_table,
-                input_table,
-                inttable);
+    ELSIF TG_OP = 'DELETE' THEN
 
     END IF;
 

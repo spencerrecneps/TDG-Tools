@@ -79,8 +79,6 @@ VALUES  (25,750,0,1),
         (40,999999,99,4),
         (45,999999,99,4),
         (99,999999,99,4);
-
-GRANT ALL ON TABLE tdg.stress_seg_mixed TO public;
 CREATE TABLE stress_seg_bike_w_park (
     speed integer,
     bike_park_lane_wd_ft integer,
@@ -114,8 +112,6 @@ VALUES  (20,99,1,1),
         (99,13,1,4),
         (99,99,99,3),
         (99,14,99,4);
-
-GRANT ALL ON TABLE tdg.stress_seg_bike_w_park TO public;
 CREATE TABLE stress_cross_w_median (
     speed integer,
     lanes integer,
@@ -135,8 +131,6 @@ VALUES  (25,3,1),
         (99,3,3),
         (99,5,4),
         (99,99,4);
-
-GRANT ALL ON TABLE tdg.stress_cross_w_median TO public;
 CREATE TABLE stress_seg_bike_no_park (
     speed integer,
     bike_lane_wd_ft integer,
@@ -181,8 +175,6 @@ VALUES  (25,99,1,1),
         (99,5,2,4),
         (99,99,99,4),
         (99,5,99,4);
-
-GRANT ALL ON TABLE tdg.stress_seg_bike_no_park TO public;
 CREATE TABLE stress_cross_no_median (
     speed integer,
     lanes integer,
@@ -202,8 +194,6 @@ VALUES  (25,3,1),
         (99,3,3),
         (99,5,4),
         (99,99,4);
-
-GRANT ALL ON TABLE tdg.stress_cross_no_median TO public;
 CREATE OR REPLACE FUNCTION tdgSetTurnInfo ( linktable REGCLASS,
                                             inttable REGCLASS,
                                             verttable REGCLASS,
@@ -1225,13 +1215,14 @@ BEGIN
                                 road_name TEXT,
                                 road_from TEXT,
                                 road_to TEXT,
+                                intersection_from INT,
+                                intersection_to INT,
                                 source_data TEXT,
                                 source_id TEXT,
                                 functional_class TEXT,
                                 one_way VARCHAR(2),
                                 speed_limit INT,
                                 adt INT,
-                                z_value INT,
                                 ft_seg_lanes_thru INT,
                                 ft_seg_lanes_bike_wd_ft INT,
                                 ft_seg_lanes_park_wd_ft INT,
@@ -1269,11 +1260,7 @@ BEGIN
                                 tf_cross_speed_limit INT,
                                 tf_cross_lanes INT,
                                 tf_cross_stress_override INT,
-                                tf_cross_stress INT,
-                                source INT,
-                                target INT,
-                                ft_cost INT,
-                                tf_cost INT)
+                                tf_cross_stress INT)
             ',  outtabname,
                 srid);
     END;
@@ -1326,22 +1313,13 @@ BEGIN
         EXECUTE query;
     END;
 
-    --snap geom to grid to nearest 2 ft
-    BEGIN
-        RAISE NOTICE 'snapping road geometries';
-        EXECUTE format('
-            UPDATE  %s
-            SET     geom = ST_SnapToGrid(geom,2);
-            ',  outtabname);
-    END;
-
     --indexes
     BEGIN
         EXECUTE format('
             CREATE INDEX sidx_%s_geom ON %s USING GIST(geom);
             CREATE INDEX idx_%s_oneway ON %s (one_way);
-            CREATE INDEX idx_%s_zval ON %s (z_value);
-            CREATE INDEX idx_%s_srctrgt ON %s (source,target);
+            CREATE INDEX idx_%s_sourceid ON %s (source_id);
+            CREATE INDEX idx_%s_funcclass ON %s (functional_class);
             ',  output_table,
                 outtabname,
                 output_table,
@@ -1360,15 +1338,36 @@ BEGIN
         PERFORM tdgMakeIntersections(outtabname::REGCLASS);
     END;
 
+    --intersection indexes
+    BEGIN
+        EXECUTE format('
+            CREATE INDEX idx_%s_intfrom ON %s (intersection_from);
+            CREATE INDEX idx_%s_intto ON %s (intersection_to);
+            ',  output_table,
+                outtabname,
+                output_table,
+                outtabname);
+    END;
+
+    BEGIN
+        EXECUTE format('ANALYZE %s;', output_table);
+    END;
+
     --triggers
     BEGIN
         EXECUTE format('
-            CREATE TRIGGER tdg%sGeomIntersections
+            CREATE TRIGGER tdg%sGeomIntersectionUpdate
                 AFTER UPDATE OF geom ON %s
                 FOR EACH ROW
                 EXECUTE PROCEDURE tdgUpdateIntersections();
             ',  output_table,
                 output_table);
+--        EXECUTE format('
+--            CREATE TRIGGER tdg%sGeomIntersectionAdd
+--                AFTER UPDATE OF geom ON %s
+--                EXECUTE PROCEDURE tdgUpdateIntersections();
+--            ',  output_table,
+--                output_table);
     END;
 
     RETURN 't';
@@ -1445,9 +1444,27 @@ BEGIN
                 inttable);
     END;
 
-EXECUTE format('ANALYZE %s;', inttable);
+    EXECUTE format('ANALYZE %s;', inttable);
 
-RETURN 't';
+    -- add intersection data to roads
+    BEGIN
+        RAISE NOTICE 'populating intersection data in roads table';
+        EXECUTE format('
+            UPDATE  %s
+            SET     intersection_from = if.id,
+                    intersection_to = it.id
+            FROM    %s if,
+                    %s it
+            WHERE   ST_StartPoint(%s.geom) = if.geom
+            and     ST_EndPoint(%s.geom) = it.geom;
+            ',  input_table,
+                inttable,
+                inttable,
+                input_table,
+                input_table);
+    END;
+
+    RETURN 't';
 END $func$ LANGUAGE plpgsql;
 ALTER FUNCTION tdgMakeIntersections(REGCLASS) OWNER TO gis;
 CREATE OR REPLACE FUNCTION tdgGenerateIntersectionStreets (input_table REGCLASS, intids INT[])
@@ -2005,7 +2022,66 @@ BEGIN
     RETURN NULL;
 END;
 $BODY$ LANGUAGE plpgsql;
-ALTER FUNCTION tdgMakeIntersections(REGCLASS) OWNER TO gis;
+ALTER FUNCTION tdgUpdateLinks() OWNER TO gis;
+CREATE OR REPLACE FUNCTION tdgAddIntersections ()
+RETURNS TRIGGER
+AS $BODY$
+
+DECLARE
+    inttable TEXT;
+
+BEGIN
+    inttable := TG_TABLE_NAME || '_intersections';
+
+    IF (TG_OP = 'UPDATE' OR TG_OP = 'INSERT') THEN
+        --create new intersection point at road startpoint (if applicable)
+        EXECUTE format('
+            INSERT INTO %s (geom)
+            SELECT  ST_StartPoint(newrow.geom)
+            FROM (SELECT NEW.*) AS newrow
+            WHERE   NOT EXISTS (SELECT  1
+                                FROM    %s ints
+                                WHERE   ints.geom = ST_StartPoint(newrow.geom));
+            ',  inttable,
+                inttable);
+
+        --update road with new intersection point
+        EXECUTE format('
+            SELECT  id
+            FROM    %s
+            WHERE   %s.geom = ST_StartPoint(NEW.geom);
+            ') INTO NEW.intersection_from;
+
+
+        --create new intersection point at road endpoint (if applicable)
+        EXECUTE format('
+            INSERT INTO %s (geom)
+            SELECT  ST_StartPoint(NEW.geom)
+            WHERE   NOT EXISTS (SELECT  1
+                                FROM    %s ints
+                                WHERE   ints.geom = ST_EndPoint(NEW.geom));
+            ',  inttable,
+                inttable);
+
+        --update road with new intersection point
+        EXECUTE format('
+            SELECT  id
+            FROM    %s
+            WHERE   %s.geom = ST_EndPoint(NEW.geom);
+            ') INTO NEW.intersection_to;
+
+    ELSIF TG_OP = 'DELETE' THEN
+
+    END IF;
+
+    RETURN NULL;
+END;
+$BODY$ LANGUAGE plpgsql;
+ALTER FUNCTION tdgAddIntersections() OWNER TO gis;
+
+
+
+-- http://www.postgresql.org/docs/current/static/plpgsql-trigger.html
 CREATE OR REPLACE FUNCTION tdgUpdateIntersections ()
 RETURNS TRIGGER
 AS $BODY$
@@ -2015,19 +2091,61 @@ DECLARE
 
 BEGIN
     inttable := TG_TABLE_NAME || '_intersections';
-    
-    IF (TG_OP = 'UPDATE') THEN
 
-    ELSIF (TG_OP = 'DELETE') THEN
+    IF (TG_OP = 'UPDATE' OR TG_OP = 'INSERT') THEN
+        --create new intersection point at road startpoint (if applicable)
+--        EXECUTE format('
+--            INSERT INTO %s (geom)
+--            SELECT ST_StartPoint(NEW.geom)
+--            WHERE   NOT EXISTS (SELECT  1
+--                                FROM    %s ints
+--                                WHERE   ints.geom = ST_StartPoint(NEW.geom));
+--            ',  inttable,
+--                inttable);
+        EXECUTE '   INSERT INTO ' || inttable || '(geom)
+                    SELECT  ST_StartPoint($2.geom)
+                    WHERE   NOT EXISTS (SELECT  1
+                                        FROM    ' || inttable || ' ints
+                                        WHERE   ints.geom = ST_StartPoint($2.geom));'
+        USING   NEW,
+                NEW;
 
-    ELSIF (TG_OP = 'INSERT') THEN
+        --update road with new intersection point
+        EXECUTE '
+            SELECT  id
+            FROM '  || inttable || ' ints
+            WHERE   ints.geom = ST_StartPoint($1.geom);
+            '
+        INTO NEW.intersection_from
+        USING NEW;
+
+
+        --create new intersection point at road endpoint (if applicable)
+        EXECUTE '   INSERT INTO ' || inttable || '(geom)
+                    SELECT  ST_EndPoint($2.geom)
+                    WHERE   NOT EXISTS (SELECT  1
+                                        FROM    ' || inttable || ' ints
+                                        WHERE   ints.geom = ST_EndPoint($2.geom));'
+        USING   NEW,
+                NEW;
+
+        --update road with new intersection point
+        EXECUTE '
+            SELECT  id
+            FROM '  || inttable || ' ints
+            WHERE   ints.geom = ST_EndPoint($1.geom);
+            '
+        INTO NEW.intersection_to
+        USING NEW;
+
+    ELSIF TG_OP = 'DELETE' THEN
 
     END IF;
 
     RETURN NULL;
 END;
 $BODY$ LANGUAGE plpgsql;
-ALTER FUNCTION tdgMakeIntersections(REGCLASS) OWNER TO gis;
+ALTER FUNCTION tdgUpdateIntersections() OWNER TO gis;
 
 
 

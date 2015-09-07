@@ -85,7 +85,7 @@ BEGIN
                 inttable,
                 inttable,
                 input_table,
-                input_table)
+                input_table);
     END;
 
     RETURN 't';

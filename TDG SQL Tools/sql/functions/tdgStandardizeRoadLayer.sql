@@ -214,12 +214,12 @@ BEGIN
                 EXECUTE PROCEDURE tdgUpdateIntersections();
             ',  output_table,
                 output_table);
-        EXECUTE format('
-            CREATE TRIGGER tdg%sGeomIntersectionAdd
-                AFTER UPDATE OF geom ON %s
-                EXECUTE PROCEDURE tdgUpdateIntersections();
-            ',  output_table,
-                output_table);
+--        EXECUTE format('
+--            CREATE TRIGGER tdg%sGeomIntersectionAdd
+--                AFTER UPDATE OF geom ON %s
+--                EXECUTE PROCEDURE tdgUpdateIntersections();
+--            ',  output_table,
+--                output_table);
     END;
 
     RETURN 't';

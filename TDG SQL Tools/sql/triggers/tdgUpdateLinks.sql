@@ -17,4 +17,4 @@ BEGIN
     RETURN NULL;
 END;
 $BODY$ LANGUAGE plpgsql;
-ALTER FUNCTION tdgMakeIntersections(REGCLASS) OWNER TO gis;
+ALTER FUNCTION tdgUpdateLinks() OWNER TO gis;
