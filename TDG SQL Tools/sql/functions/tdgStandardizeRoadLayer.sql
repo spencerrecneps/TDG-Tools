@@ -209,7 +209,7 @@ BEGIN
     BEGIN
         EXECUTE format('
             CREATE TRIGGER tdg%sGeomIntersectionUpdate
-                AFTER UPDATE OF geom ON %s
+                BEFORE UPDATE OF geom ON %s
                 FOR EACH ROW
                 EXECUTE PROCEDURE tdgUpdateIntersections();
             ',  output_table,
