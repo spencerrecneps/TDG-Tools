@@ -6,11 +6,13 @@ DECLARE
     inttable TEXT;
     legs INT;
     newpointexists BOOLEAN;
+    startintersection RECORD;
+    endintersection RECORD;
 
 BEGIN
     inttable := TG_TABLE_SCHEMA || '.' || TG_TABLE_NAME || '_intersections';
 
-    IF (TG_OP = 'UPDATE' OR TG_OP = 'INSERT') THEN
+    IF TG_OP = 'UPDATE' THEN
         --snap new geom
         NEW.geom := ST_SnapToGrid(NEW.geom,2);
 
@@ -84,7 +86,7 @@ BEGIN
 
 
         -------------------
-        --  END POINT  --
+        --   END POINT   --
         -------------------
         --test whether the end point changed
         IF NOT ST_EndPoint(NEW.geom) = ST_EndPoint(OLD.geom) THEN
@@ -152,6 +154,69 @@ BEGIN
                 USING NEW;
             END IF;
         END IF;
+
+
+    ELSIF TG_OP = 'INSERT' THEN
+        --snap new geom
+        NEW.geom := ST_SnapToGrid(NEW.geom,2);
+
+        -------------------
+        --  START POINT  --
+        -------------------
+        -- get start intersection data if it already exists
+        EXECUTE '
+            SELECT  id, geom, legs
+            FROM ' || inttable || '
+            WHERE   geom = ST_StartPoint($1.geom);'
+        INTO    startintersection
+        USING   NEW;
+
+        -- insert/update intersections and new record
+        IF startintersection.id IS NULL THEN
+            EXECUTE '
+                INSERT INTO ' || inttable || ' (geom, legs)
+                SELECT ST_StartPoint($1.geom), 1
+                RETURNING id;'
+            INTO    NEW.intersection_from
+            USING   NEW;
+        ELSE
+            NEW.intersection_from := startintersection.id;
+            EXECUTE '
+                UPDATE ' || inttable || '
+                SET     legs = COALESCE(legs,0) + 1
+                WHERE   id = $1;'
+            USING   startintersection.id;
+        END IF;
+
+
+        -------------------
+        --   END POINT   --
+        -------------------
+        -- get end intersection data if it already exists
+        EXECUTE '
+            SELECT  id, geom, legs
+            FROM ' || inttable || '
+            WHERE   geom = ST_EndPoint($1.geom);'
+        INTO    endintersection
+        USING   NEW;
+
+        -- insert/update intersections and new record
+        IF endintersection.id IS NULL THEN
+            EXECUTE '
+                INSERT INTO ' || inttable || ' (geom, legs)
+                SELECT ST_EndPoint($1.geom), 1
+                RETURNING id;'
+            INTO    NEW.intersection_to
+            USING   NEW;
+        ELSE
+            NEW.intersection_to := endintersection.id;
+            EXECUTE '
+                UPDATE ' || inttable || '
+                SET     legs = COALESCE(legs,0) + 1
+                WHERE   id = $1;'
+            USING   endintersection.id;
+        END IF;
+
 
     ELSIF TG_OP = 'DELETE' THEN
 
