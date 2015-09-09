@@ -1225,13 +1225,14 @@ BEGIN
                                 road_name TEXT,
                                 road_from TEXT,
                                 road_to TEXT,
+                                intersection_from INT,
+                                intersection_to INT,
                                 source_data TEXT,
                                 source_id TEXT,
                                 functional_class TEXT,
                                 one_way VARCHAR(2),
                                 speed_limit INT,
                                 adt INT,
-                                z_value INT,
                                 ft_seg_lanes_thru INT,
                                 ft_seg_lanes_bike_wd_ft INT,
                                 ft_seg_lanes_park_wd_ft INT,
@@ -1269,11 +1270,7 @@ BEGIN
                                 tf_cross_speed_limit INT,
                                 tf_cross_lanes INT,
                                 tf_cross_stress_override INT,
-                                tf_cross_stress INT,
-                                source INT,
-                                target INT,
-                                ft_cost INT,
-                                tf_cost INT)
+                                tf_cross_stress INT)
             ',  outtabname,
                 srid);
     END;
@@ -1326,22 +1323,13 @@ BEGIN
         EXECUTE query;
     END;
 
-    --snap geom to grid to nearest 2 ft
-    BEGIN
-        RAISE NOTICE 'snapping road geometries';
-        EXECUTE format('
-            UPDATE  %s
-            SET     geom = ST_SnapToGrid(geom,2);
-            ',  outtabname);
-    END;
-
     --indexes
     BEGIN
         EXECUTE format('
             CREATE INDEX sidx_%s_geom ON %s USING GIST(geom);
             CREATE INDEX idx_%s_oneway ON %s (one_way);
-            CREATE INDEX idx_%s_zval ON %s (z_value);
-            CREATE INDEX idx_%s_srctrgt ON %s (source,target);
+            CREATE INDEX idx_%s_sourceid ON %s (source_id);
+            CREATE INDEX idx_%s_funcclass ON %s (functional_class);
             ',  output_table,
                 outtabname,
                 output_table,
@@ -1358,6 +1346,48 @@ BEGIN
 
     BEGIN
         PERFORM tdgMakeIntersections(outtabname::REGCLASS);
+    END;
+
+    --intersection indexes
+    BEGIN
+        EXECUTE format('
+            CREATE INDEX idx_%s_intfrom ON %s (intersection_from);
+            CREATE INDEX idx_%s_intto ON %s (intersection_to);
+            ',  output_table,
+                outtabname,
+                output_table,
+                outtabname);
+    END;
+
+    BEGIN
+        EXECUTE format('ANALYZE %s;', output_table);
+    END;
+
+    --not null on intersections
+    BEGIN
+        EXECUTE format('
+            ALTER TABLE %s ALTER COLUMN intersection_from SET NOT NULL;
+            ALTER TABLE %s ALTER COLUMN intersection_to SET NOT NULL;
+            ',  outtabname,
+                outtabname);
+    END;
+
+    --triggers
+    BEGIN
+        EXECUTE format('
+            CREATE TRIGGER tdg%sGeomIntersectionUpdate
+                BEFORE UPDATE OF geom ON %s
+                FOR EACH ROW
+                EXECUTE PROCEDURE tdgUpdateIntersections();
+            ',  output_table,
+                output_table);
+        EXECUTE format('
+            CREATE TRIGGER tdg%sGeomIntersectionAddDel
+                BEFORE INSERT OR DELETE ON %s
+                FOR EACH ROW
+                EXECUTE PROCEDURE tdgUpdateIntersections();
+            ',  output_table,
+                output_table);
     END;
 
     RETURN 't';
@@ -1434,9 +1464,45 @@ BEGIN
                 inttable);
     END;
 
-EXECUTE format('ANALYZE %s;', inttable);
+    EXECUTE format('ANALYZE %s;', inttable);
 
-RETURN 't';
+    -- add intersection data to roads
+    BEGIN
+        RAISE NOTICE 'populating intersection data in roads table';
+        EXECUTE format('
+            UPDATE  %s
+            SET     intersection_from = if.id,
+                    intersection_to = it.id
+            FROM    %s if,
+                    %s it
+            WHERE   ST_StartPoint(%s.geom) = if.geom
+            and     ST_EndPoint(%s.geom) = it.geom;
+            ',  input_table,
+                inttable,
+                inttable,
+                input_table,
+                input_table);
+    END;
+
+    --triggers
+    BEGIN
+        EXECUTE format('
+            CREATE TRIGGER tdg%sGeomPreventUpdate
+                BEFORE UPDATE OF geom ON %s
+                FOR EACH ROW
+                EXECUTE PROCEDURE tdgTriggerDoNothing();
+            ',  table_name || '_ints',
+                inttable);
+        EXECUTE format('
+            CREATE TRIGGER tdg%sPreventInsDel
+                BEFORE INSERT OR DELETE ON %s
+                FOR EACH ROW
+                EXECUTE PROCEDURE tdgTriggerDoNothing();
+            ',  table_name || '_ints',
+                inttable);
+    END;
+
+    RETURN 't';
 END $func$ LANGUAGE plpgsql;
 ALTER FUNCTION tdgMakeIntersections(REGCLASS) OWNER TO gis;
 CREATE OR REPLACE FUNCTION tdgGenerateIntersectionStreets (input_table REGCLASS, intids INT[])
@@ -1975,3 +2041,169 @@ BEGIN
     RETURN tabledetails;
 END $func$ LANGUAGE plpgsql;
 ALTER FUNCTION tdgTableDetails(REGCLASS) OWNER TO gis;
+CREATE OR REPLACE FUNCTION tdgTriggerDoNothing ()
+RETURNS TRIGGER
+AS $BODY$
+
+--------------------------------------------------------------------------
+-- This function is prevents a change from being committed.
+--------------------------------------------------------------------------
+
+BEGIN
+    RETURN NULL;
+END;
+$BODY$ LANGUAGE plpgsql;
+ALTER FUNCTION tdgTriggerDoNothing() OWNER TO gis;
+CREATE OR REPLACE FUNCTION tdgUpdateIntersections ()
+RETURNS TRIGGER
+AS $BODY$
+
+--------------------------------------------------------------------------
+-- This function is called automatically anytime a change is made to the
+-- geometry of a record in a TDG-standardized road layer. It snaps
+-- the new geometry to a 2-ft grid and then updates the intersection
+-- information.
+--
+-- N.B. If the end of a cul-de-sac is moved, the old intersection point
+-- is deleted and a new one is created. This should be an edge case
+-- and wouldn't cause any problems anyway. A fix to move the intersection
+-- point rather than create a new one would complicate the code and the
+-- current behavior isn't really problematic.
+--------------------------------------------------------------------------
+
+DECLARE
+    inttable TEXT;
+    legs INT;
+    startintersection RECORD;
+    endintersection RECORD;
+
+BEGIN
+    inttable := TG_TABLE_SCHEMA || '.' || TG_TABLE_NAME || '_intersections';
+
+    IF (TG_OP = 'UPDATE' OR TG_OP = 'INSERT') THEN
+        --snap new geom
+        NEW.geom := ST_SnapToGrid(NEW.geom,2);
+
+        -------------------
+        --  START POINT  --
+        -------------------
+        -- get new start intersection data if it already exists
+        EXECUTE '
+            SELECT  id, geom, legs
+            FROM ' || inttable || '
+            WHERE   geom = ST_StartPoint($1.geom);'
+        INTO    startintersection
+        USING   NEW;
+
+        -- insert/update intersections and new record
+        IF startintersection.id IS NULL THEN
+            EXECUTE '
+                INSERT INTO ' || inttable || ' (geom, legs)
+                SELECT ST_StartPoint($1.geom), 1
+                RETURNING id;'
+            INTO    NEW.intersection_from
+            USING   NEW;
+        ELSE
+            NEW.intersection_from := startintersection.id;
+            EXECUTE '
+                UPDATE ' || inttable || '
+                SET     legs = COALESCE(legs,0) + 1
+                WHERE   id = $1;'
+            USING   startintersection.id;
+        END IF;
+
+
+        -------------------
+        --   END POINT   --
+        -------------------
+        -- get end intersection data if it already exists
+        EXECUTE '
+            SELECT  id, geom, legs
+            FROM ' || inttable || '
+            WHERE   geom = ST_EndPoint($1.geom);'
+        INTO    endintersection
+        USING   NEW;
+
+        -- insert/update intersections and new record
+        IF endintersection.id IS NULL THEN
+            EXECUTE '
+                INSERT INTO ' || inttable || ' (geom, legs)
+                SELECT ST_EndPoint($1.geom), 1
+                RETURNING id;'
+            INTO    NEW.intersection_to
+            USING   NEW;
+        ELSE
+            NEW.intersection_to := endintersection.id;
+            EXECUTE '
+                UPDATE ' || inttable || '
+                SET     legs = COALESCE(legs,0) + 1
+                WHERE   id = $1;'
+            USING   endintersection.id;
+        END IF;
+    END IF;
+
+    IF (TG_OP = 'DELETE' OR TG_OP = 'UPDATE') THEN
+        -------------------
+        --  START POINT  --
+        -------------------
+        --do nothing if startpoint didn't change
+        IF (TG_OP = 'DELETE' OR NOT (ST_StartPoint(NEW.geom) = ST_StartPoint(OLD.geom))) THEN
+            -- get start intersection legs
+            EXECUTE '
+                SELECT  legs
+                FROM ' || inttable || '
+                WHERE   id = $1.intersection_from;'
+            INTO    legs
+            USING   OLD;
+
+            IF legs > 1 THEN
+                EXECUTE '
+                    UPDATE ' || inttable || '
+                    SET     legs = legs - 1
+                    WHERE   id = $1.intersection_from;'
+                USING   OLD;
+            ELSE
+                EXECUTE '
+                    DELETE FROM ' || inttable || '
+                    WHERE   id = $1.intersection_from;'
+                USING   OLD;
+            END IF;
+        END IF;
+
+
+        -------------------
+        --   END POINT   --
+        -------------------
+        --do nothing if endpoint didn't change
+        IF (TG_OP = 'DELETE' OR NOT (ST_EndPoint(NEW.geom) = ST_EndPoint(OLD.geom))) THEN
+            -- get end intersection legs
+            EXECUTE '
+                SELECT  legs
+                FROM ' || inttable || '
+                WHERE   id = $1.intersection_to;'
+            INTO    legs
+            USING   OLD;
+
+            IF legs > 1 THEN
+                EXECUTE '
+                    UPDATE ' || inttable || '
+                    SET     legs = legs - 1
+                    WHERE   id = $1.intersection_to;'
+                USING   OLD;
+            ELSE
+                EXECUTE '
+                    DELETE FROM ' || inttable || '
+                    WHERE   id = $1.intersection_to;'
+                USING   OLD;
+            END IF;
+        END IF;
+    END IF;
+
+    IF TG_OP = 'DELETE' THEN
+        RETURN OLD;
+    ELSE
+        RETURN NEW;
+    END IF;
+END;
+$BODY$ LANGUAGE plpgsql;
+ALTER FUNCTION tdgUpdateIntersections() OWNER TO gis;

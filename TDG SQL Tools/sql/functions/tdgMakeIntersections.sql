@@ -68,8 +68,44 @@ BEGIN
                 inttable);
     END;
 
-EXECUTE format('ANALYZE %s;', inttable);
+    EXECUTE format('ANALYZE %s;', inttable);
 
-RETURN 't';
+    -- add intersection data to roads
+    BEGIN
+        RAISE NOTICE 'populating intersection data in roads table';
+        EXECUTE format('
+            UPDATE  %s
+            SET     intersection_from = if.id,
+                    intersection_to = it.id
+            FROM    %s if,
+                    %s it
+            WHERE   ST_StartPoint(%s.geom) = if.geom
+            and     ST_EndPoint(%s.geom) = it.geom;
+            ',  input_table,
+                inttable,
+                inttable,
+                input_table,
+                input_table);
+    END;
+
+    --triggers
+    BEGIN
+        EXECUTE format('
+            CREATE TRIGGER tdg%sGeomPreventUpdate
+                BEFORE UPDATE OF geom ON %s
+                FOR EACH ROW
+                EXECUTE PROCEDURE tdgTriggerDoNothing();
+            ',  table_name || '_ints',
+                inttable);
+        EXECUTE format('
+            CREATE TRIGGER tdg%sPreventInsDel
+                BEFORE INSERT OR DELETE ON %s
+                FOR EACH ROW
+                EXECUTE PROCEDURE tdgTriggerDoNothing();
+            ',  table_name || '_ints',
+                inttable);
+    END;
+
+    RETURN 't';
 END $func$ LANGUAGE plpgsql;
 ALTER FUNCTION tdgMakeIntersections(REGCLASS) OWNER TO gis;
