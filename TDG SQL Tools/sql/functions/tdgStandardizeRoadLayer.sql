@@ -205,6 +205,15 @@ BEGIN
         EXECUTE format('ANALYZE %s;', output_table);
     END;
 
+    --not null on intersections
+    BEGIN
+        EXECUTE format('
+            ALTER TABLE %s ALTER COLUMN intersection_from SET NOT NULL;
+            ALTER TABLE %s ALTER COLUMN intersection_to SET NOT NULL;
+            ',  outtabname,
+                outtabname);
+    END;
+
     --triggers
     BEGIN
         EXECUTE format('

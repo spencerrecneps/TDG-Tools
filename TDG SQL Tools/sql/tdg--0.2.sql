@@ -1353,6 +1353,15 @@ BEGIN
         EXECUTE format('ANALYZE %s;', output_table);
     END;
 
+    --not null on intersections
+    BEGIN
+        EXECUTE format('
+            ALTER TABLE %s ALTER COLUMN intersection_from SET NOT NULL;
+            ALTER TABLE %s ALTER COLUMN intersection_to SET NOT NULL;
+            ',  outtabname,
+                outtabname);
+    END;
+
     --triggers
     BEGIN
         EXECUTE format('
@@ -2090,158 +2099,13 @@ AS $BODY$
 DECLARE
     inttable TEXT;
     legs INT;
-    newpointexists BOOLEAN;
     startintersection RECORD;
     endintersection RECORD;
 
 BEGIN
     inttable := TG_TABLE_SCHEMA || '.' || TG_TABLE_NAME || '_intersections';
 
-    IF TG_OP = 'UPDATE' THEN
-        --snap new geom
-        NEW.geom := ST_SnapToGrid(NEW.geom,2);
-
-        -------------------
-        --  START POINT  --
-        -------------------
-        --test whether the start point changed
-        IF NOT ST_StartPoint(NEW.geom) = ST_StartPoint(OLD.geom) THEN
-
-            --test old start intersection point for number of legs
-            EXECUTE 'SELECT legs FROM ' || inttable || ' WHERE id = $1.intersection_from;'
-            INTO    legs
-            USING   NEW;
-
-            --test new start intersection point to see if it already exists
-            EXECUTE '
-                SELECT  1
-                FROM ' || inttable || '
-                WHERE   geom = ST_StartPoint($1.geom)
-                AND     NOT id = $1.intersection_from;'
-            INTO    newpointexists
-            USING   NEW;
-            newpointexists := COALESCE(newpointexists,0::BOOLEAN);
-
-            IF legs = 1 THEN
-                IF newpointexists THEN
-                    --delete old intersection point
-                    EXECUTE 'DELETE FROM ' || inttable || ' WHERE id = $1.intersection_from;'
-                    USING NEW;
-                ELSE --new location doesn't already exist
-                    --move intersection point to new road startpoint
-                    EXECUTE '
-                        UPDATE ' || inttable || '
-                        SET     geom = ST_StartPoint($1.geom)
-                        WHERE   id = $2.intersection_from;'
-                    USING   NEW,
-                            NEW;
-                END IF;
-            ELSE --legs != 1
-                IF NOT newpointexists THEN
-                    --create new intersection point at road startpoint (if applicable)
-                    EXECUTE '   INSERT INTO ' || inttable || '(geom)
-                                SELECT  ST_StartPoint($1.geom);'
-                    USING   NEW;
-                END IF;
-            END IF;
-
-            --update road with new intersection point
-            EXECUTE '
-                SELECT  id
-                FROM '  || inttable || ' ints
-                WHERE   ints.geom = ST_StartPoint($1.geom);'
-            INTO NEW.intersection_from
-            USING NEW;
-
-            --update legs on old and new intersections
-            IF legs > 1 OR newpointexists THEN
-                EXECUTE '
-                    UPDATE ' || inttable || '
-                    SET     legs = legs - 1
-                    WHERE   id = $1.intersection_from;'
-                USING OLD;
-
-                EXECUTE '
-                    UPDATE ' || inttable || '
-                    SET     legs = COALESCE(legs,0) + 1
-                    WHERE   id = $1.intersection_from;'
-                USING NEW;
-            END IF;
-        END IF;
-
-
-        -------------------
-        --   END POINT   --
-        -------------------
-        --test whether the end point changed
-        IF NOT ST_EndPoint(NEW.geom) = ST_EndPoint(OLD.geom) THEN
-
-            --test old end intersection point for number of legs
-            legs := NULL;
-            EXECUTE 'SELECT legs FROM ' || inttable || ' WHERE id = $1.intersection_to;'
-            INTO    legs
-            USING   NEW;
-
-            --test new end intersection point to see if it already exists
-            newpointexists := NULL;
-            EXECUTE '
-                SELECT  1
-                FROM ' || inttable || '
-                WHERE   geom = ST_EndPoint($1.geom)
-                AND     NOT id = $1.intersection_to;'
-            INTO    newpointexists
-            USING   NEW;
-            newpointexists := COALESCE(newpointexists,0::BOOLEAN);
-
-            IF legs = 1 THEN
-                IF newpointexists THEN
-                    --delete old intersection point
-                    EXECUTE 'DELETE FROM ' || inttable || ' WHERE id = $1.intersection_to;'
-                    USING NEW;
-                ELSE --new location doesn't already exist
-                    --move intersection point to new road endpoint
-                    EXECUTE '
-                        UPDATE ' || inttable || '
-                        SET     geom = ST_EndPoint($1.geom)
-                        WHERE   id = $2.intersection_to;'
-                    USING   NEW,
-                            NEW;
-                END IF;
-            ELSE --legs != 1
-                IF NOT newpointexists THEN
-                    --create new intersection point at road endpoint (if applicable)
-                    EXECUTE '   INSERT INTO ' || inttable || '(geom)
-                                SELECT  ST_EndPoint($1.geom);'
-                    USING   NEW;
-                END IF;
-            END IF;
-
-            --update road with new intersection point
-            EXECUTE '
-                SELECT  id
-                FROM '  || inttable || ' ints
-                WHERE   ints.geom = ST_EndPoint($1.geom);'
-            INTO NEW.intersection_to
-            USING NEW;
-
-            --update legs on old and new intersections
-            IF legs > 1 OR newpointexists THEN
-                EXECUTE '
-                    UPDATE ' || inttable || '
-                    SET     legs = legs - 1
-                    WHERE   id = $1.intersection_to;'
-                USING OLD;
-
-                EXECUTE '
-                    UPDATE ' || inttable || '
-                    SET     legs = COALESCE(legs,0) + 1
-                    WHERE   id = $1.intersection_to;'
-                USING NEW;
-            END IF;
-        END IF;
-
-
-    ELSIF TG_OP = 'INSERT' THEN
+    IF (TG_OP = 'UPDATE' OR TG_OP = 'INSERT') THEN
         --snap new geom
         NEW.geom := ST_SnapToGrid(NEW.geom,2);
 
@@ -2252,13 +2116,12 @@ BEGIN
         EXECUTE '
             SELECT  id, geom, legs
             FROM ' || inttable || '
-            WHERE   geom = ST_StartPoint($1.geom)
-            AND     NOT id = $1.intersection_from;'
+            WHERE   geom = ST_StartPoint($1.geom);'
         INTO    startintersection
         USING   NEW;
 
         -- insert/update intersections and new record
-        IF startintersection IS NULL THEN
+        IF startintersection.id IS NULL THEN
             EXECUTE '
                 INSERT INTO ' || inttable || ' (geom, legs)
                 SELECT ST_StartPoint($1.geom), 1
@@ -2282,13 +2145,12 @@ BEGIN
         EXECUTE '
             SELECT  id, geom, legs
             FROM ' || inttable || '
-            WHERE   geom = ST_EndPoint($1.geom)
-            AND     NOT id = $1.intersection_to;'
+            WHERE   geom = ST_EndPoint($1.geom);'
         INTO    endintersection
         USING   NEW;
 
         -- insert/update intersections and new record
-        IF endintersection IS NULL THEN
+        IF endintersection.id IS NULL THEN
             EXECUTE '
                 INSERT INTO ' || inttable || ' (geom, legs)
                 SELECT ST_EndPoint($1.geom), 1
@@ -2303,10 +2165,63 @@ BEGIN
                 WHERE   id = $1;'
             USING   endintersection.id;
         END IF;
+    END IF;
+
+    IF (TG_OP = 'DELETE' OR TG_OP = 'UPDATE') THEN
+        -------------------
+        --  START POINT  --
+        -------------------
+        --do nothing if startpoint didn't change
+        IF (TF_OP = 'DELETE' OR NOT (ST_StartPoint(NEW.geom) = ST_StartPoint(OLD.geom))) THEN
+            -- get start intersection legs
+            EXECUTE '
+                SELECT  legs
+                FROM ' || inttable || '
+                WHERE   id = $1.intersection_from;'
+            INTO    legs
+            USING   OLD;
+
+            IF legs > 1 THEN
+                EXECUTE '
+                    DELETE FROM ' || inttable || '
+                    WHERE   id = $1.intersection_from;'
+                USING   OLD;
+            ELSE
+                EXECUTE '
+                    UPDATE ' || inttable || '
+                    SET     legs = legs - 1
+                    WHERE   id = $1.intersection_from;'
+                USING   OLD;
+            END IF;
+        END IF;
 
 
-    ELSIF TG_OP = 'DELETE' THEN
+        -------------------
+        --   END POINT   --
+        -------------------
+        --do nothing if endpoint didn't change
+        IF (TF_OP = 'DELETE' OR NOT (ST_EndPoint(NEW.geom) = ST_EndPoint(OLD.geom))) THEN
+            -- get end intersection legs
+            EXECUTE '
+                SELECT  legs
+                FROM ' || inttable || '
+                WHERE   id = $1.intersection_to;'
+            INTO    legs
+            USING   OLD;
 
+            IF legs > 1 THEN
+                EXECUTE '
+                    DELETE FROM ' || inttable || '
+                    WHERE   id = $1.intersection_to;'
+                USING   OLD;
+            ELSE
+                EXECUTE '
+                    UPDATE ' || inttable || '
+                    SET     legs = legs - 1
+                    WHERE   id = $1.intersection_to;'
+                USING   OLD;
+            END IF;
+        END IF;
     END IF;
 
     RETURN NEW;
