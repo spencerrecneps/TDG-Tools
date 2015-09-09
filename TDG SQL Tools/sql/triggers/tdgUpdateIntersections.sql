@@ -2,6 +2,19 @@ CREATE OR REPLACE FUNCTION tdgUpdateIntersections ()
 RETURNS TRIGGER
 AS $BODY$
 
+--------------------------------------------------------------------------
+-- This function is called automatically anytime a change is made to the
+-- geometry of a record in a TDG-standardized road layer. It snaps
+-- the new geometry to a 2-ft grid and then updates the intersection
+-- information.
+--
+-- N.B. If the end of a cul-de-sac is moved, the old intersection point
+-- is deleted and a new one is created. This should be an edge case
+-- and wouldn't cause any problems anyway. A fix to move the intersection
+-- point rather than create a new one would complicate the code and the
+-- current behavior isn't really problematic.
+--------------------------------------------------------------------------
+
 DECLARE
     inttable TEXT;
     legs INT;
@@ -9,8 +22,14 @@ DECLARE
     endintersection RECORD;
 
 BEGIN
+    --get the intersection table
     inttable := TG_TABLE_SCHEMA || '.' || TG_TABLE_NAME || '_intersections';
 
+    --suspend triggers on the intersections table so that our
+    --changes are not ignored.
+    EXECUTE 'ALTER TABLE ' || inttable || ' DISABLE TRIGGER ALL;';
+
+    --trigger operation
     IF (TG_OP = 'UPDATE' OR TG_OP = 'INSERT') THEN
         --snap new geom
         NEW.geom := ST_SnapToGrid(NEW.geom,2);
@@ -18,19 +37,13 @@ BEGIN
         -------------------
         --  START POINT  --
         -------------------
-        -- get start intersection data if it already exists
+        -- get new start intersection data if it already exists
         EXECUTE '
             SELECT  id, geom, legs
             FROM ' || inttable || '
             WHERE   geom = ST_StartPoint($1.geom);'
         INTO    startintersection
         USING   NEW;
-
-
-        -- need to add some logic in here to not create a new intersection
-        -- when the update simply moves an existing endpoint with legs = 1
-        -- perhaps treat as entirely different IF clause at beginning?
-
 
         -- insert/update intersections and new record
         IF startintersection.id IS NULL THEN
@@ -136,6 +149,9 @@ BEGIN
         END IF;
     END IF;
 
+    --re-enable triggers on the intersections table
+    EXECUTE 'ALTER TABLE ' || inttable || ' ENABLE TRIGGER ALL;';
+
     IF TG_OP = 'DELETE' THEN
         RETURN OLD;
     ELSE
@@ -144,7 +160,3 @@ BEGIN
 END;
 $BODY$ LANGUAGE plpgsql;
 ALTER FUNCTION tdgUpdateIntersections() OWNER TO gis;
-
-
-
--- http://www.postgresql.org/docs/current/static/plpgsql-trigger.html

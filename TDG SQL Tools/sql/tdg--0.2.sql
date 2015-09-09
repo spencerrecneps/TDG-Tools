@@ -1474,6 +1474,24 @@ BEGIN
                 input_table);
     END;
 
+    --triggers
+    BEGIN
+        EXECUTE format('
+            CREATE TRIGGER tdg%sGeomPreventUpdate
+                BEFORE UPDATE OF geom ON %s
+                FOR EACH ROW
+                EXECUTE PROCEDURE tdgTriggerDoNothing();
+            ',  table_name || '_ints',
+                inttable);
+        EXECUTE format('
+            CREATE TRIGGER tdg%sPreventInsDel
+                BEFORE INSERT OR DELETE ON %s
+                FOR EACH ROW
+                EXECUTE PROCEDURE tdgTriggerDoNothing();
+            ',  table_name || '_ints',
+                inttable);
+    END;
+
     RETURN 't';
 END $func$ LANGUAGE plpgsql;
 ALTER FUNCTION tdgMakeIntersections(REGCLASS) OWNER TO gis;
@@ -2013,88 +2031,35 @@ BEGIN
     RETURN tabledetails;
 END $func$ LANGUAGE plpgsql;
 ALTER FUNCTION tdgTableDetails(REGCLASS) OWNER TO gis;
-CREATE OR REPLACE FUNCTION tdgUpdateLinks ()
+CREATE OR REPLACE FUNCTION tdgTriggerDoNothing ()
 RETURNS TRIGGER
 AS $BODY$
 
-DECLARE
-    linktable TEXT;
+--------------------------------------------------------------------------
+-- This function is prevents a change from being committed.
+--------------------------------------------------------------------------
 
 BEGIN
-    IF (TG_OP = 'UPDATE') THEN
-
-    ELSIF (TG_OP = 'DELETE') THEN
-
-    ELSIF (TG_OP = 'INSERT') THEN
-
-    END IF;
-
     RETURN NULL;
 END;
 $BODY$ LANGUAGE plpgsql;
-ALTER FUNCTION tdgUpdateLinks() OWNER TO gis;
-CREATE OR REPLACE FUNCTION tdgAddIntersections ()
-RETURNS TRIGGER
-AS $BODY$
-
-DECLARE
-    inttable TEXT;
-
-BEGIN
-    inttable := TG_TABLE_NAME || '_intersections';
-
-    IF (TG_OP = 'UPDATE' OR TG_OP = 'INSERT') THEN
-        --create new intersection point at road startpoint (if applicable)
-        EXECUTE format('
-            INSERT INTO %s (geom)
-            SELECT  ST_StartPoint(newrow.geom)
-            FROM (SELECT NEW.*) AS newrow
-            WHERE   NOT EXISTS (SELECT  1
-                                FROM    %s ints
-                                WHERE   ints.geom = ST_StartPoint(newrow.geom));
-            ',  inttable,
-                inttable);
-
-        --update road with new intersection point
-        EXECUTE format('
-            SELECT  id
-            FROM    %s
-            WHERE   %s.geom = ST_StartPoint(NEW.geom);
-            ') INTO NEW.intersection_from;
-
-
-        --create new intersection point at road endpoint (if applicable)
-        EXECUTE format('
-            INSERT INTO %s (geom)
-            SELECT  ST_StartPoint(NEW.geom)
-            WHERE   NOT EXISTS (SELECT  1
-                                FROM    %s ints
-                                WHERE   ints.geom = ST_EndPoint(NEW.geom));
-            ',  inttable,
-                inttable);
-
-        --update road with new intersection point
-        EXECUTE format('
-            SELECT  id
-            FROM    %s
-            WHERE   %s.geom = ST_EndPoint(NEW.geom);
-            ') INTO NEW.intersection_to;
-
-    ELSIF TG_OP = 'DELETE' THEN
-
-    END IF;
-
-    RETURN NULL;
-END;
-$BODY$ LANGUAGE plpgsql;
-ALTER FUNCTION tdgAddIntersections() OWNER TO gis;
-
-
-
--- http://www.postgresql.org/docs/current/static/plpgsql-trigger.html
+ALTER FUNCTION tdgTriggerDoNothing() OWNER TO gis;
 CREATE OR REPLACE FUNCTION tdgUpdateIntersections ()
 RETURNS TRIGGER
 AS $BODY$
+
+--------------------------------------------------------------------------
+-- This function is called automatically anytime a change is made to the
+-- geometry of a record in a TDG-standardized road layer. It snaps
+-- the new geometry to a 2-ft grid and then updates the intersection
+-- information.
+--
+-- N.B. If the end of a cul-de-sac is moved, the old intersection point
+-- is deleted and a new one is created. This should be an edge case
+-- and wouldn't cause any problems anyway. A fix to move the intersection
+-- point rather than create a new one would complicate the code and the
+-- current behavior isn't really problematic.
+--------------------------------------------------------------------------
 
 DECLARE
     inttable TEXT;
@@ -2112,7 +2077,7 @@ BEGIN
         -------------------
         --  START POINT  --
         -------------------
-        -- get start intersection data if it already exists
+        -- get new start intersection data if it already exists
         EXECUTE '
             SELECT  id, geom, legs
             FROM ' || inttable || '
@@ -2172,7 +2137,7 @@ BEGIN
         --  START POINT  --
         -------------------
         --do nothing if startpoint didn't change
-        IF (TF_OP = 'DELETE' OR NOT (ST_StartPoint(NEW.geom) = ST_StartPoint(OLD.geom))) THEN
+        IF (TG_OP = 'DELETE' OR NOT (ST_StartPoint(NEW.geom) = ST_StartPoint(OLD.geom))) THEN
             -- get start intersection legs
             EXECUTE '
                 SELECT  legs
@@ -2183,13 +2148,13 @@ BEGIN
 
             IF legs > 1 THEN
                 EXECUTE '
-                    DELETE FROM ' || inttable || '
+                    UPDATE ' || inttable || '
+                    SET     legs = legs - 1
                     WHERE   id = $1.intersection_from;'
                 USING   OLD;
             ELSE
                 EXECUTE '
-                    UPDATE ' || inttable || '
-                    SET     legs = legs - 1
+                    DELETE FROM ' || inttable || '
                     WHERE   id = $1.intersection_from;'
                 USING   OLD;
             END IF;
@@ -2200,7 +2165,7 @@ BEGIN
         --   END POINT   --
         -------------------
         --do nothing if endpoint didn't change
-        IF (TF_OP = 'DELETE' OR NOT (ST_EndPoint(NEW.geom) = ST_EndPoint(OLD.geom))) THEN
+        IF (TG_OP = 'DELETE' OR NOT (ST_EndPoint(NEW.geom) = ST_EndPoint(OLD.geom))) THEN
             -- get end intersection legs
             EXECUTE '
                 SELECT  legs
@@ -2211,24 +2176,24 @@ BEGIN
 
             IF legs > 1 THEN
                 EXECUTE '
-                    DELETE FROM ' || inttable || '
+                    UPDATE ' || inttable || '
+                    SET     legs = legs - 1
                     WHERE   id = $1.intersection_to;'
                 USING   OLD;
             ELSE
                 EXECUTE '
-                    UPDATE ' || inttable || '
-                    SET     legs = legs - 1
+                    DELETE FROM ' || inttable || '
                     WHERE   id = $1.intersection_to;'
                 USING   OLD;
             END IF;
         END IF;
     END IF;
 
-    RETURN NEW;
+    IF TG_OP = 'DELETE' THEN
+        RETURN OLD;
+    ELSE
+        RETURN NEW;
+    END IF;
 END;
 $BODY$ LANGUAGE plpgsql;
 ALTER FUNCTION tdgUpdateIntersections() OWNER TO gis;
-
-
-
--- http://www.postgresql.org/docs/current/static/plpgsql-trigger.html

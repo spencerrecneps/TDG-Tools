@@ -88,6 +88,24 @@ BEGIN
                 input_table);
     END;
 
+    --triggers
+    BEGIN
+        EXECUTE format('
+            CREATE TRIGGER tdg%sGeomPreventUpdate
+                BEFORE UPDATE OF geom ON %s
+                FOR EACH ROW
+                EXECUTE PROCEDURE tdgTriggerDoNothing();
+            ',  table_name || '_ints',
+                inttable);
+        EXECUTE format('
+            CREATE TRIGGER tdg%sPreventInsDel
+                BEFORE INSERT OR DELETE ON %s
+                FOR EACH ROW
+                EXECUTE PROCEDURE tdgTriggerDoNothing();
+            ',  table_name || '_ints',
+                inttable);
+    END;
+
     RETURN 't';
 END $func$ LANGUAGE plpgsql;
 ALTER FUNCTION tdgMakeIntersections(REGCLASS) OWNER TO gis;
