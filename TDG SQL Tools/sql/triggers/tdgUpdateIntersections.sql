@@ -6,7 +6,8 @@ AS $BODY$
 -- This function is called automatically anytime a change is made to the
 -- geometry of a record in a TDG-standardized road layer. It snaps
 -- the new geometry to a 2-ft grid and then updates the intersection
--- information.
+-- information. The geometry matches an existing intersection if it
+-- is within 5 ft of another intersection.
 --
 -- N.B. If the end of a cul-de-sac is moved, the old intersection point
 -- is deleted and a new one is created. This should be an edge case
@@ -37,58 +38,74 @@ BEGIN
         -------------------
         --  START POINT  --
         -------------------
-        -- get new start intersection data if it already exists
-        EXECUTE '
-            SELECT  id, geom, legs
-            FROM ' || inttable || '
-            WHERE   geom = ST_StartPoint($1.geom);'
-        INTO    startintersection
-        USING   NEW;
+        --do nothing if startpoint didn't change
+        IF (TG_OP = 'INSERT' OR NOT (ST_StartPoint(NEW.geom) = ST_StartPoint(OLD.geom))) THEN
+            -- get new start intersection data if it already exists
+            EXECUTE '
+                SELECT  id, geom, legs
+                FROM ' || inttable || '
+                WHERE       ST_DWithin(geom,ST_StartPoint($1.geom),5)
+                AND         geom <#> $1.geom <= 5
+                ORDER BY    geom <#> ST_StartPoint($1.geom) ASC
+                LIMIT       1;'
+            INTO    startintersection
+            USING   NEW,
+                    NEW,
+                    NEW;
 
-        -- insert/update intersections and new record
-        IF startintersection.id IS NULL THEN
-            EXECUTE '
-                INSERT INTO ' || inttable || ' (geom, legs)
-                SELECT ST_StartPoint($1.geom), 1
-                RETURNING id;'
-            INTO    NEW.intersection_from
-            USING   NEW;
-        ELSE
-            NEW.intersection_from := startintersection.id;
-            EXECUTE '
-                UPDATE ' || inttable || '
-                SET     legs = COALESCE(legs,0) + 1
-                WHERE   id = $1;'
-            USING   startintersection.id;
+            -- insert/update intersections and new record
+            IF startintersection.id IS NULL THEN
+                EXECUTE '
+                    INSERT INTO ' || inttable || ' (geom, legs)
+                    SELECT ST_StartPoint($1.geom), 1
+                    RETURNING id;'
+                INTO    NEW.intersection_from
+                USING   NEW;
+            ELSE
+                NEW.intersection_from := startintersection.id;
+                EXECUTE '
+                    UPDATE ' || inttable || '
+                    SET     legs = COALESCE(legs,0) + 1
+                    WHERE   id = $1;'
+                USING   startintersection.id;
+            END IF;
         END IF;
 
 
         -------------------
         --   END POINT   --
         -------------------
-        -- get end intersection data if it already exists
-        EXECUTE '
-            SELECT  id, geom, legs
-            FROM ' || inttable || '
-            WHERE   geom = ST_EndPoint($1.geom);'
-        INTO    endintersection
-        USING   NEW;
+        --do nothing if startpoint didn't change
+        IF (TG_OP = 'INSERT' OR NOT (ST_EndPoint(NEW.geom) = ST_EndPoint(OLD.geom))) THEN
+            -- get end intersection data if it already exists
+            EXECUTE '
+                SELECT  id, geom, legs
+                FROM ' || inttable || '
+                WHERE       ST_DWithin(geom,ST_EndPoint($1.geom),5)
+                AND         geom <#> $1.geom <= 5
+                ORDER BY    geom <#> ST_EndPoint($1.geom) ASC
+                LIMIT       1;'
+            INTO    endintersection
+            USING   NEW,
+                    NEW,
+                    NEW;
 
-        -- insert/update intersections and new record
-        IF endintersection.id IS NULL THEN
-            EXECUTE '
-                INSERT INTO ' || inttable || ' (geom, legs)
-                SELECT ST_EndPoint($1.geom), 1
-                RETURNING id;'
-            INTO    NEW.intersection_to
-            USING   NEW;
-        ELSE
-            NEW.intersection_to := endintersection.id;
-            EXECUTE '
-                UPDATE ' || inttable || '
-                SET     legs = COALESCE(legs,0) + 1
-                WHERE   id = $1;'
-            USING   endintersection.id;
+            -- insert/update intersections and new record
+            IF endintersection.id IS NULL THEN
+                EXECUTE '
+                    INSERT INTO ' || inttable || ' (geom, legs)
+                    SELECT ST_EndPoint($1.geom), 1
+                    RETURNING id;'
+                INTO    NEW.intersection_to
+                USING   NEW;
+            ELSE
+                NEW.intersection_to := endintersection.id;
+                EXECUTE '
+                    UPDATE ' || inttable || '
+                    SET     legs = COALESCE(legs,0) + 1
+                    WHERE   id = $1;'
+                USING   endintersection.id;
+            END IF;
         END IF;
     END IF;
 

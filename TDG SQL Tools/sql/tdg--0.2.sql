@@ -9,7 +9,8 @@ CREATE TABLE stress_seg_mixed (
     speed integer,
     adt integer,
     lanes integer,
-    stress integer
+    stress integer,
+    CONSTRAINT stress_seg_mixed_key PRIMARY KEY (speed,adt,lanes,stress)
 );
 
 INSERT INTO stress_seg_mixed (speed, adt, lanes, stress)
@@ -81,11 +82,13 @@ VALUES  (25,750,0,1),
         (99,999999,99,4);
 
 GRANT ALL ON TABLE tdg.stress_seg_mixed TO public;
+ANALYZE tdg.stress_seg_mixed;
 CREATE TABLE stress_seg_bike_w_park (
     speed integer,
     bike_park_lane_wd_ft integer,
     lanes integer,
-    stress integer
+    stress integer,
+    CONSTRAINT stress_seg_bike_w_park_key PRIMARY KEY (speed,bike_park_lane_wd_ft,lanes,stress)
 );
 
 INSERT INTO stress_seg_bike_w_park (speed, bike_park_lane_wd_ft, lanes, stress)
@@ -116,10 +119,12 @@ VALUES  (20,99,1,1),
         (99,14,99,4);
 
 GRANT ALL ON TABLE tdg.stress_seg_bike_w_park TO public;
+ANALYZE tdg.stress_seg_bike_w_park;
 CREATE TABLE stress_cross_w_median (
     speed integer,
     lanes integer,
-    stress integer
+    stress integer,
+    CONSTRAINT stress_cross_w_median_pkey PRIMARY KEY (speed,lanes,stress)
 );
 
 INSERT INTO stress_cross_w_median (speed, lanes, stress)
@@ -137,11 +142,13 @@ VALUES  (25,3,1),
         (99,99,4);
 
 GRANT ALL ON TABLE tdg.stress_cross_w_median TO public;
+ANALYZE tdg.stress_cross_w_median;
 CREATE TABLE stress_seg_bike_no_park (
     speed integer,
     bike_lane_wd_ft integer,
     lanes integer,
-    stress integer
+    stress integer,
+    CONSTRAINT stress_seg_bike_no_park_key PRIMARY KEY (speed,bike_lane_wd_ft,lanes,stress)
 );
 
 INSERT INTO stress_seg_bike_no_park (speed, bike_lane_wd_ft, lanes, stress)
@@ -183,10 +190,12 @@ VALUES  (25,99,1,1),
         (99,5,99,4);
 
 GRANT ALL ON TABLE tdg.stress_seg_bike_no_park TO public;
+ANALYZE tdg.stress_seg_bike_no_park;
 CREATE TABLE stress_cross_no_median (
     speed integer,
     lanes integer,
-    stress integer
+    stress integer,
+    CONSTRAINT stress_cross_no_median_pkey PRIMARY KEY (speed,lanes,stress)
 );
 
 INSERT INTO stress_cross_no_median (speed, lanes, stress)
@@ -204,6 +213,7 @@ VALUES  (25,3,1),
         (99,99,4);
 
 GRANT ALL ON TABLE tdg.stress_cross_no_median TO public;
+ANALYZE tdg.stress_cross_no_median;
 CREATE OR REPLACE FUNCTION tdgSetTurnInfo ( linktable REGCLASS,
                                             inttable REGCLASS,
                                             verttable REGCLASS,
@@ -2078,8 +2088,14 @@ DECLARE
     endintersection RECORD;
 
 BEGIN
+    --get the intersection table
     inttable := TG_TABLE_SCHEMA || '.' || TG_TABLE_NAME || '_intersections';
 
+    --suspend triggers on the intersections table so that our
+    --changes are not ignored.
+    EXECUTE 'ALTER TABLE ' || inttable || ' DISABLE TRIGGER ALL;';
+
+    --trigger operation
     IF (TG_OP = 'UPDATE' OR TG_OP = 'INSERT') THEN
         --snap new geom
         NEW.geom := ST_SnapToGrid(NEW.geom,2);
@@ -2198,6 +2214,9 @@ BEGIN
             END IF;
         END IF;
     END IF;
+
+    --re-enable triggers on the intersections table
+    EXECUTE 'ALTER TABLE ' || inttable || ' ENABLE TRIGGER ALL;';
 
     IF TG_OP = 'DELETE' THEN
         RETURN OLD;
