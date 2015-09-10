@@ -1,7 +1,8 @@
 CREATE TABLE stress_cross_w_median (
     speed integer,
     lanes integer,
-    stress integer
+    stress integer,
+    CONSTRAINT stress_cross_w_median_pkey PRIMARY KEY (speed,lanes,stress)
 );
 
 INSERT INTO stress_cross_w_median (speed, lanes, stress)
@@ -19,3 +20,4 @@ VALUES  (25,3,1),
         (99,99,4);
 
 GRANT ALL ON TABLE tdg.stress_cross_w_median TO public;
+ANALYZE tdg.stress_cross_w_median;

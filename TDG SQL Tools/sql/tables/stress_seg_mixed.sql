@@ -2,7 +2,8 @@ CREATE TABLE stress_seg_mixed (
     speed integer,
     adt integer,
     lanes integer,
-    stress integer
+    stress integer,
+    CONSTRAINT stress_seg_mixed_key PRIMARY KEY (speed,adt,lanes,stress)
 );
 
 INSERT INTO stress_seg_mixed (speed, adt, lanes, stress)
@@ -74,3 +75,4 @@ VALUES  (25,750,0,1),
         (99,999999,99,4);
 
 GRANT ALL ON TABLE tdg.stress_seg_mixed TO public;
+ANALYZE tdg.stress_seg_mixed;

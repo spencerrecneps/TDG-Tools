@@ -2,7 +2,8 @@ CREATE TABLE stress_seg_bike_no_park (
     speed integer,
     bike_lane_wd_ft integer,
     lanes integer,
-    stress integer
+    stress integer,
+    CONSTRAINT stress_seg_bike_no_park_key PRIMARY KEY (speed,bike_lane_wd_ft,lanes,stress)
 );
 
 INSERT INTO stress_seg_bike_no_park (speed, bike_lane_wd_ft, lanes, stress)
@@ -44,3 +45,4 @@ VALUES  (25,99,1,1),
         (99,5,99,4);
 
 GRANT ALL ON TABLE tdg.stress_seg_bike_no_park TO public;
+ANALYZE tdg.stress_seg_bike_no_park;
