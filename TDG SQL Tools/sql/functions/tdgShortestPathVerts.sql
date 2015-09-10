@@ -1,17 +1,17 @@
-CREATE OR REPLACE FUNCTION tdgShortestPath (_linktable REGCLASS,
-                                            _verttable REGCLASS,
-                                            _from INT,
-                                            _to INT,
-                                            _stress INT DEFAULT NULL)
+CREATE OR REPLACE FUNCTION tdgShortestPath (linktable_ REGCLASS,
+                                            verttable_ REGCLASS,
+                                            from_ INT,
+                                            to_ INT,
+                                            stress_ INT DEFAULT NULL)
 RETURNS SETOF tdgShortestPathType AS $$
 
 import networkx as nx
 
 # check node existence
-qc = plpy.execute('SELECT EXISTS (SELECT 1 FROM %s WHERE node_id = %s)' % (_verttable,_from))
+qc = plpy.execute('SELECT EXISTS (SELECT 1 FROM %s WHERE node_id = %s)' % (verttable_,from_))
 if not qc[0]['exists']:
     plpy.error('From vertex does not exist.')
-qc = plpy.execute('SELECT EXISTS (SELECT 1 FROM %s WHERE node_id = %s)' % (_verttable,_to))
+qc = plpy.execute('SELECT EXISTS (SELECT 1 FROM %s WHERE node_id = %s)' % (verttable_,to_))
 if not qc[0]['exists']:
     plpy.error('To vertex does not exist.')
 
@@ -20,11 +20,11 @@ DG=nx.DiGraph()
 
 # read input stress
 stress = 99
-if not _stress is None:
-    stress = _stress
+if not stress_ is None:
+    stress = stress_
 
 # edges first
-edges = plpy.execute('SELECT * FROM %s;' % _linktable)
+edges = plpy.execute('SELECT * FROM %s;' % linktable_)
 for e in edges:
     DG.add_edge(e['source_node'],
                 e['target_node'],
@@ -34,7 +34,7 @@ for e in edges:
                 road_id=e['road_id'])
 
 # then vertices
-verts = plpy.execute('SELECT * FROM %s;' % _verttable)
+verts = plpy.execute('SELECT * FROM %s;' % verttable_)
 for v in verts:
     vid = v['node_id']
     DG.node[vid]['weight'] = max(v['node_cost'],0)
@@ -43,9 +43,9 @@ for v in verts:
 
 # get the shortest path
 plpy.info('Checking for path existence')
-if nx.has_path(DG,source=_from,target=_to):
+if nx.has_path(DG,source=from_,target=to_):
     plpy.info('Path found')
-    shortestPath = nx.shortest_path(DG,source=_from,target=_to,weight='weight')
+    shortestPath = nx.shortest_path(DG,source=from_,target=to_,weight='weight')
 else:
     plpy.error('No path between given vertices')
 
