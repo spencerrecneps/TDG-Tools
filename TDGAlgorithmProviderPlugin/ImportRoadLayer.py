@@ -73,7 +73,7 @@ class ImportRoadLayer(GeoAlgorithm):
 
         # The branch of the toolbox under which the algorithm will appear
         #self.group = 'Algorithms for vector layers'
-        self.group = 'Network Analysis'
+        self.group = 'Data Management'
 
         # Input roads layer. Must be line type
         # It is a mandatory (not optional) one, hence the False argument

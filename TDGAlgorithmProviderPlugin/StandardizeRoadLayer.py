@@ -73,7 +73,7 @@ class StandardizeRoadLayer(GeoAlgorithm):
 
         # The branch of the toolbox under which the algorithm will appear
         #self.group = 'Algorithms for vector layers'
-        self.group = 'Network Analysis'
+        self.group = 'Data Management'
 
         # name for new table
         # mandatory
