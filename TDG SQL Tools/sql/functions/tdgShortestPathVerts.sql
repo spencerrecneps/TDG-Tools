@@ -1,8 +1,8 @@
-CREATE OR REPLACE FUNCTION tdgShortestPath (linktable_ REGCLASS,
-                                            verttable_ REGCLASS,
-                                            from_ INT,
-                                            to_ INT,
-                                            stress_ INT DEFAULT NULL)
+CREATE OR REPLACE FUNCTION tdgShortestPathVerts (   linktable_ REGCLASS,
+                                                    verttable_ REGCLASS,
+                                                    from_ INT,
+                                                    to_ INT,
+                                                    stress_ INT DEFAULT NULL)
 RETURNS SETOF tdgShortestPathType AS $$
 
 import networkx as nx
@@ -61,38 +61,33 @@ def getNextNode(nodes,node):
 
 # build the return values
 ret = []
+seq = 0
 for v1 in shortestPath:
+    seq = seq + 1
     v2 = getNextNode(shortestPath,v1)
     if v2:
-        ret.append((None,
+        ret.append((seq,
+                    None,
                     v1,
                     None,
                     DG.node[v1]['intersection_id'],
                     DG.node[v1]['weight']))
-        ret.append((DG.edge[v1][v2]['link_id'],
+        seq = seq + 1
+        ret.append((seq,
+                    DG.edge[v1][v2]['link_id'],
                     None,
                     DG.edge[v1][v2]['road_id'],
                     None,
                     DG.edge[v1][v2]['weight']))
     else:
-        ret.append((None,
+        ret.append((seq,
+                    None,
                     v1,
                     None,
                     DG.node[v1]['intersection_id'],
                     DG.node[v1]['weight']))
 
-#return ([1,2,3,4,5],[6,5,4,3,2])
 return ret
 
-
-# link_id INT,
-# vert_id INT,
-# road_id INT,
-# int_id INT,
-# move_cost INT
-
-#with b (f) as ( select bar())
-#select (b.f).a, (b.f).b from b
-
 $$ LANGUAGE plpythonu;
-ALTER FUNCTION tdgShortestPath(REGCLASS,REGCLASS,INT,INT,INT) OWNER TO gis;
+ALTER FUNCTION tdgShortestPathVerts(REGCLASS,REGCLASS,INT,INT,INT) OWNER TO gis;

@@ -1,4 +1,5 @@
 CREATE TYPE tdgShortestPathType AS (
+    move_sequence INT,
     link_id INT,
     vert_id INT,
     road_id INT,
@@ -578,40 +579,20 @@ BEGIN
 RETURN 't';
 END $func$ LANGUAGE plpgsql;
 ALTER FUNCTION tdgTableCheck(REGCLASS) OWNER TO gis;
--- CREATE OR REPLACE FUNCTION tdgShortestPath (_linktable REGCLASS,
---                                             _verttable REGCLASS,
---                                             _fromGeom geometry,
---                                             _toGeom geometry,
---                                             _stress INT DEFAULT NULL)
--- RETURNS TABLE ( link_id INT,
---                 vert_id INT,
---                 road_id INT,
---                 int_id INT,
---                 move_cost INT) AS $$
---
---
--- --needs to create temporary vertices table with added verts to represent
--- --the from/to points. then pass the temp tables to
--- --tdgShortestPathVerts
---
--- RETURN ([1,2,3,4,5],[6,5,4,3,2])
---
--- $$ LANGUAGE plpgsql;
--- ALTER FUNCTION tdgShortestPath(REGCLASS,REGCLASS,geometry,geometry,INT) OWNER TO gis;
-CREATE OR REPLACE FUNCTION tdgShortestPath (_linktable REGCLASS,
-                                            _verttable REGCLASS,
-                                            _from INT,
-                                            _to INT,
-                                            _stress INT DEFAULT NULL)
+CREATE OR REPLACE FUNCTION tdgShortestPathVerts (   linktable_ REGCLASS,
+                                                    verttable_ REGCLASS,
+                                                    from_ INT,
+                                                    to_ INT,
+                                                    stress_ INT DEFAULT NULL)
 RETURNS SETOF tdgShortestPathType AS $$
 
 import networkx as nx
 
 # check node existence
-qc = plpy.execute('SELECT EXISTS (SELECT 1 FROM %s WHERE node_id = %s)' % (_verttable,_from))
+qc = plpy.execute('SELECT EXISTS (SELECT 1 FROM %s WHERE node_id = %s)' % (verttable_,from_))
 if not qc[0]['exists']:
     plpy.error('From vertex does not exist.')
-qc = plpy.execute('SELECT EXISTS (SELECT 1 FROM %s WHERE node_id = %s)' % (_verttable,_to))
+qc = plpy.execute('SELECT EXISTS (SELECT 1 FROM %s WHERE node_id = %s)' % (verttable_,to_))
 if not qc[0]['exists']:
     plpy.error('To vertex does not exist.')
 
@@ -620,11 +601,11 @@ DG=nx.DiGraph()
 
 # read input stress
 stress = 99
-if not _stress is None:
-    stress = _stress
+if not stress_ is None:
+    stress = stress_
 
 # edges first
-edges = plpy.execute('SELECT * FROM %s;' % _linktable)
+edges = plpy.execute('SELECT * FROM %s;' % linktable_)
 for e in edges:
     DG.add_edge(e['source_node'],
                 e['target_node'],
@@ -634,7 +615,7 @@ for e in edges:
                 road_id=e['road_id'])
 
 # then vertices
-verts = plpy.execute('SELECT * FROM %s;' % _verttable)
+verts = plpy.execute('SELECT * FROM %s;' % verttable_)
 for v in verts:
     vid = v['node_id']
     DG.node[vid]['weight'] = max(v['node_cost'],0)
@@ -643,9 +624,9 @@ for v in verts:
 
 # get the shortest path
 plpy.info('Checking for path existence')
-if nx.has_path(DG,source=_from,target=_to):
+if nx.has_path(DG,source=from_,target=to_):
     plpy.info('Path found')
-    shortestPath = nx.shortest_path(DG,source=_from,target=_to,weight='weight')
+    shortestPath = nx.shortest_path(DG,source=from_,target=to_,weight='weight')
 else:
     plpy.error('No path between given vertices')
 
@@ -661,41 +642,36 @@ def getNextNode(nodes,node):
 
 # build the return values
 ret = []
+seq = 0
 for v1 in shortestPath:
+    seq = seq + 1
     v2 = getNextNode(shortestPath,v1)
     if v2:
-        ret.append((None,
+        ret.append((seq,
+                    None,
                     v1,
                     None,
                     DG.node[v1]['intersection_id'],
                     DG.node[v1]['weight']))
-        ret.append((DG.edge[v1][v2]['link_id'],
+        seq = seq + 1
+        ret.append((seq,
+                    DG.edge[v1][v2]['link_id'],
                     None,
                     DG.edge[v1][v2]['road_id'],
                     None,
                     DG.edge[v1][v2]['weight']))
     else:
-        ret.append((None,
+        ret.append((seq,
+                    None,
                     v1,
                     None,
                     DG.node[v1]['intersection_id'],
                     DG.node[v1]['weight']))
 
-#return ([1,2,3,4,5],[6,5,4,3,2])
 return ret
 
-
-# link_id INT,
-# vert_id INT,
-# road_id INT,
-# int_id INT,
-# move_cost INT
-
-#with b (f) as ( select bar())
-#select (b.f).a, (b.f).b from b
-
 $$ LANGUAGE plpythonu;
-ALTER FUNCTION tdgShortestPath(REGCLASS,REGCLASS,INT,INT,INT) OWNER TO gis;
+ALTER FUNCTION tdgShortestPathVerts(REGCLASS,REGCLASS,INT,INT,INT) OWNER TO gis;
 CREATE OR REPLACE FUNCTION tdgUpdateNetwork (input_table REGCLASS, rowids INT[])
 RETURNS BOOLEAN AS $func$
 
@@ -1166,6 +1142,95 @@ BEGIN
 RETURN 't';
 END $func$ LANGUAGE plpgsql;
 ALTER FUNCTION tdgMakeNetwork(REGCLASS) OWNER TO gis;
+CREATE OR REPLACE FUNCTION tdgShortestPathIntersections (   inttable_ REGCLASS,
+                                                            linktable_ REGCLASS,
+                                                            verttable_ REGCLASS,
+                                                            from_ INT,
+                                                            to_ INT,
+                                                            stress_ INT DEFAULT NULL)
+RETURNS SETOF tdgShortestPathType AS $func$
+
+DECLARE
+    vertcheck BOOLEAN;
+    fromtestvert INT;
+    totestvert INT;
+    minfromvert INT;
+    mintovert INT;
+    mincost INT;
+    comparecost INT;
+
+BEGIN
+    --check intersections for existence
+    RAISE NOTICE 'Checking intersections';
+
+    EXECUTE 'SELECT EXISTS (SELECT 1 FROM '|| inttable_ || ' WHERE id IN ($1,$2));'
+    INTO    vertcheck
+    USING   from_,
+            to_;
+
+    IF NOT vertcheck THEN
+        EXECUTE 'SELECT EXISTS (SELECT 1 FROM '|| inttable_ || ' WHERE id = $1);'
+        INTO    vertcheck
+        USING   from_;
+
+        IF NOT vertcheck THEN
+            RAISE EXCEPTION 'Nonexistent intersection --> %', from_::TEXT
+            USING HINT = 'Please check your intersections';
+        END IF;
+
+        EXECUTE 'SELECT EXISTS (SELECT 1 FROM '|| inttable_ || ' WHERE id = $1);'
+        INTO    vertcheck
+        USING   to_;
+
+        IF NOT vertcheck THEN
+            RAISE EXCEPTION 'Nonexistent intersection --> %', to_::TEXT
+            USING HINT = 'Please check your intersections';
+        END IF;
+    END IF;
+
+    RAISE NOTICE 'Testing shortest paths';
+    --do shortest path starting at first vertex to other vertices
+    --then do another and compare SUM(move_cost) to first. Keep lowest.
+    FOR fromtestvert IN
+    EXECUTE '   SELECT  node_id
+                FROM ' || verttable_ || '
+                WHERE   intersection_id = $1;'
+    USING   from_
+    LOOP
+        FOR totestvert IN
+        EXECUTE '   SELECT  node_id
+                    FROM ' || verttable_ || '
+                    WHERE   intersection_id = $1;'
+        USING   to_
+        LOOP
+            EXECUTE '   SELECT SUM(move_cost)
+                        FROM    tdgShortestPathVerts($1,$2,$3,$4,$5);'
+            USING   linktable_,
+                    verttable_,
+                    fromtestvert,
+                    totestvert,
+                    stress_
+            INTO    comparecost;
+
+            IF mincost IS NULL OR comparecost < mincost THEN
+                mincost := comparecost;
+                minfromvert := fromtestvert;
+                mintovert := totestvert;
+            END IF;
+        END LOOP;
+    END LOOP;
+
+RETURN QUERY
+EXECUTE '   SELECT  *
+            FROM    tdgShortestPathVerts($1,$2,$3,$4,$5);'
+USING   linktable_,
+        verttable_,
+        minfromvert,
+        mintovert,
+        stress_;
+--followed by empty RETURN???
+END $func$ LANGUAGE plpgsql;
+ALTER FUNCTION tdgShortestPathIntersections(REGCLASS,REGCLASS,REGCLASS,INT,INT,INT) OWNER TO gis;
 CREATE OR REPLACE FUNCTION tdgStandardizeRoadLayer( input_table REGCLASS,
                                                     output_table TEXT,
                                                     id_field TEXT,
@@ -2072,7 +2137,8 @@ AS $BODY$
 -- This function is called automatically anytime a change is made to the
 -- geometry of a record in a TDG-standardized road layer. It snaps
 -- the new geometry to a 2-ft grid and then updates the intersection
--- information.
+-- information. The geometry matches an existing intersection if it
+-- is within 5 ft of another intersection.
 --
 -- N.B. If the end of a cul-de-sac is moved, the old intersection point
 -- is deleted and a new one is created. This should be an edge case
@@ -2103,58 +2169,74 @@ BEGIN
         -------------------
         --  START POINT  --
         -------------------
-        -- get new start intersection data if it already exists
-        EXECUTE '
-            SELECT  id, geom, legs
-            FROM ' || inttable || '
-            WHERE   geom = ST_StartPoint($1.geom);'
-        INTO    startintersection
-        USING   NEW;
+        --do nothing if startpoint didn't change
+        IF (TG_OP = 'INSERT' OR NOT (ST_StartPoint(NEW.geom) = ST_StartPoint(OLD.geom))) THEN
+            -- get new start intersection data if it already exists
+            EXECUTE '
+                SELECT  id, geom, legs
+                FROM ' || inttable || '
+                WHERE       ST_DWithin(geom,ST_StartPoint($1.geom),5)
+                AND         geom <#> $1.geom <= 5
+                ORDER BY    geom <#> ST_StartPoint($1.geom) ASC
+                LIMIT       1;'
+            INTO    startintersection
+            USING   NEW,
+                    NEW,
+                    NEW;
 
-        -- insert/update intersections and new record
-        IF startintersection.id IS NULL THEN
-            EXECUTE '
-                INSERT INTO ' || inttable || ' (geom, legs)
-                SELECT ST_StartPoint($1.geom), 1
-                RETURNING id;'
-            INTO    NEW.intersection_from
-            USING   NEW;
-        ELSE
-            NEW.intersection_from := startintersection.id;
-            EXECUTE '
-                UPDATE ' || inttable || '
-                SET     legs = COALESCE(legs,0) + 1
-                WHERE   id = $1;'
-            USING   startintersection.id;
+            -- insert/update intersections and new record
+            IF startintersection.id IS NULL THEN
+                EXECUTE '
+                    INSERT INTO ' || inttable || ' (geom, legs)
+                    SELECT ST_StartPoint($1.geom), 1
+                    RETURNING id;'
+                INTO    NEW.intersection_from
+                USING   NEW;
+            ELSE
+                NEW.intersection_from := startintersection.id;
+                EXECUTE '
+                    UPDATE ' || inttable || '
+                    SET     legs = COALESCE(legs,0) + 1
+                    WHERE   id = $1;'
+                USING   startintersection.id;
+            END IF;
         END IF;
 
 
         -------------------
         --   END POINT   --
         -------------------
-        -- get end intersection data if it already exists
-        EXECUTE '
-            SELECT  id, geom, legs
-            FROM ' || inttable || '
-            WHERE   geom = ST_EndPoint($1.geom);'
-        INTO    endintersection
-        USING   NEW;
+        --do nothing if startpoint didn't change
+        IF (TG_OP = 'INSERT' OR NOT (ST_EndPoint(NEW.geom) = ST_EndPoint(OLD.geom))) THEN
+            -- get end intersection data if it already exists
+            EXECUTE '
+                SELECT  id, geom, legs
+                FROM ' || inttable || '
+                WHERE       ST_DWithin(geom,ST_EndPoint($1.geom),5)
+                AND         geom <#> $1.geom <= 5
+                ORDER BY    geom <#> ST_EndPoint($1.geom) ASC
+                LIMIT       1;'
+            INTO    endintersection
+            USING   NEW,
+                    NEW,
+                    NEW;
 
-        -- insert/update intersections and new record
-        IF endintersection.id IS NULL THEN
-            EXECUTE '
-                INSERT INTO ' || inttable || ' (geom, legs)
-                SELECT ST_EndPoint($1.geom), 1
-                RETURNING id;'
-            INTO    NEW.intersection_to
-            USING   NEW;
-        ELSE
-            NEW.intersection_to := endintersection.id;
-            EXECUTE '
-                UPDATE ' || inttable || '
-                SET     legs = COALESCE(legs,0) + 1
-                WHERE   id = $1;'
-            USING   endintersection.id;
+            -- insert/update intersections and new record
+            IF endintersection.id IS NULL THEN
+                EXECUTE '
+                    INSERT INTO ' || inttable || ' (geom, legs)
+                    SELECT ST_EndPoint($1.geom), 1
+                    RETURNING id;'
+                INTO    NEW.intersection_to
+                USING   NEW;
+            ELSE
+                NEW.intersection_to := endintersection.id;
+                EXECUTE '
+                    UPDATE ' || inttable || '
+                    SET     legs = COALESCE(legs,0) + 1
+                    WHERE   id = $1;'
+                USING   endintersection.id;
+            END IF;
         END IF;
     END IF;
 
