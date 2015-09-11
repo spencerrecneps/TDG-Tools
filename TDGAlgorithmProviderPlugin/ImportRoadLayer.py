@@ -53,6 +53,7 @@ class ImportRoadLayer(GeoAlgorithm):
 
     ROADS_LAYER = 'ROADS_LAYER'
     DATABASE = 'DATABASE'
+    SCHEMANAME = 'SCHEMANAME'
     TABLENAME = 'TABLENAME'
     ADDTOMAP = 'ADDTOMAP'
     OVERWRITE = 'OVERWRITE'
@@ -84,6 +85,10 @@ class ImportRoadLayer(GeoAlgorithm):
         self.DB_CONNECTIONS = self.dbConnectionNames()
         self.addParameter(ParameterSelection(self.DATABASE,
             self.tr('Database (connection name)'), self.DB_CONNECTIONS))
+
+        # Schema name
+        self.addParameter(ParameterString(self.SCHEMANAME,
+            self.tr('Schema'),default='received',optional=False))
 
         # Table name
         self.addParameter(ParameterString(self.TABLENAME,
@@ -120,6 +125,9 @@ class ImportRoadLayer(GeoAlgorithm):
             raise GeoAlgorithmExecutionException(
                 self.tr('Bad database connection name: %s' % connection))
 
+        # schema name
+        schema = self.getParameterValue(self.SCHEMANAME).strip().lower()
+
         # table name
         table = self.getParameterValue(self.TABLENAME).strip().lower()
         if table is None or len(table) < 1:
@@ -151,15 +159,15 @@ class ImportRoadLayer(GeoAlgorithm):
         ##########################
         #linestrings = processing.runalg('qgis:multiparttosingleparts')
 
-        # first create the tdg database extension if it doesn't exist
-        #processing.runalg("qgis:postgisexecutesql",database,
-        #    "CREATE EXTENSION IF NOT EXISTS tdg")
+        # first create the schema if it doesn't exist
+        processing.runalg("qgis:postgisexecutesql",database,
+            "CREATE SCHEMA IF NOT EXISTS " + schema)
 
         # set up the new table's uri
         uri = QgsDataSourceURI()
         uri.setConnection(host, str(port), database, username, password)
 
-        uri.setDataSource('tdg', table, 'geom', '', 'id')
+        uri.setDataSource(schema, table, 'geom', '', 'id')
         uri.setSrid(str(crsId))
         uri.setWkbType(QGis.WKBLineString)
         # set up inputs for the new table to be created
@@ -195,8 +203,8 @@ class ImportRoadLayer(GeoAlgorithm):
                 outLayer.addFeature(outFeat)
 
         del outLayer
-        db.create_spatial_index(table, 'tdg', 'geom')
-        db.vacuum_analyze(table, 'tdg')
+        db.create_spatial_index(table, schema, 'geom')
+        db.vacuum_analyze(table, schema)
 
         # add new table to map
         if addToMap:
