@@ -170,8 +170,9 @@ class ImportRoadLayer(GeoAlgorithm):
         tempTableName = ''.join(random.sample(string.lowercase,10))
         #processing.runalg("qgis:importintopostgis",database,tempTableName,schema,
         #    roadsLayer,False,True,'geom',True,True,None)
-        processing.runalg("qgis:importintopostgis",roadsLayer,self.getParameterValue(self.DATABASE),
-            schema,tempTableName,None,'geom',False,True,True,True)
+        processing.runalg("qgis:importintopostgis",roadsLayer,
+            self.getParameterValue(self.DATABASE),schema,tempTableName,
+            None,'geom',False,True,True,True)
 
         # move the temp table to its final location
         # need to parse the crsId to get rid of the EPSG: part
@@ -181,78 +182,19 @@ class ImportRoadLayer(GeoAlgorithm):
                 \'" + schema + "\',\
                 " + str(pgSrid) + ",\
                 " + str(overwrite) + ")")
-        '''
-        # change the geom column type to linestring in the target crs
-        processing.runalg("qgis:postgisexecutesql",database
-            "ALTER TABLE " + table + " \
-             ALTER COLUMN geom \
-             TYPE geometry(linestring," + str(crsId) + ")")
 
-        # set up a uuid field called tdg_id
-        processing.runalg("qgis:postgisexecutesql",database
-            "ALTER TABLE " + table + " \
-             ADD COLUMN tdg_id TEXT NOT NULL\
-             DEFAULT uuid_generate_v4()::TEXT")
-
-        processing.runalg("qgis:postgisexecutesql",database
-            )
+        processing.runalg("qgis:postgisexecutesql",database,
+            "ANALYZE " + schema + "." + table)
 
         # set up the new table's uri
         uri = QgsDataSourceURI()
         uri.setConnection(host, str(port), database, username, password)
 
         uri.setDataSource(schema, table, 'geom', '', 'id')
-        uri.setSrid(str(crsId))
+        uri.setSrid(str(pgSrid))
         uri.setWkbType(QGis.WKBLineString)
-        # set up inputs for the new table to be created
-        fields = roadsLayer.dataProvider().fields()
-        geomType = QGis.WKBLineString
-
-        outLayer = QgsVectorLayerImport(
-            uri.uri(),
-            providerName,
-            fields,
-            geomType,
-            targetCrs,
-            overwrite
-        )
-
-        # prepare the reprojection
-        layerCrs = roadsLayer.crs()
-        crsTransform = QgsCoordinateTransform(layerCrs, targetCrs)
-
-        # iterate features and copy over
-        outFeat = QgsFeature()
-        inGeom = QgsGeometry()
-        for feature in vector.features(roadsLayer):
-            inGeom = feature.geometry()
-            attrs = feature.attributes()
-
-            geometries = self.extractAsSingle(inGeom)
-            outFeat.setAttributes(attrs)
-
-            for g in geometries:
-                g.transform(crsTransform)
-                outFeat.setGeometry(g)
-                outLayer.addFeature(outFeat)
-
-        del outLayer
-        db.create_spatial_index(table, schema, 'geom')
-        db.vacuum_analyze(table, schema)
 
         # add new table to map
         if addToMap:
             layer = QgsVectorLayer(uri.uri(),table,'postgres')
             QgsMapLayerRegistry.instance().addMapLayer(layer)
-
-    def extractAsSingle(self, geom):
-        multiGeom = QgsGeometry()
-        geometries = []
-        if geom.isMultipart():
-            multiGeom = geom.asMultiPolyline()
-            for i in multiGeom:
-                geometries.append(QgsGeometry().fromPolyline(i))
-        else:
-            geometries.append(geom)
-        return geometries
-'''

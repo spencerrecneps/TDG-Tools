@@ -587,6 +587,7 @@ CREATE OR REPLACE FUNCTION tdgMultiToSingle (   temp_table_ REGCLASS,
 RETURNS BOOLEAN AS $func$
 
 DECLARE
+    namecheck TEXT;
     columndetails RECORD;
     newcolumnname TEXT;
 
@@ -597,6 +598,16 @@ BEGIN
     --drop table if overwrite
     IF overwrite_ THEN
         EXECUTE 'DROP TABLE IF EXISTS ' || schema_ || '.' || new_table_ || ';';
+    ELSE
+        RAISE NOTICE 'Checking whether table % exists',new_table_;
+        EXECUTE '   SELECT  table_name
+                    FROM    tdgTableDetails($1)'
+        USING   new_table_
+        INTO    namecheck;
+
+        IF NOT namecheck IS NULL THEN
+            RAISE EXCEPTION 'Table % already exists', new_table_;
+        END IF;
     END IF;
 
     --create new table
@@ -637,7 +648,17 @@ BEGIN
         END IF;
     END LOOP;
 
+    --drop the temp_id column
+    EXECUTE 'ALTER TABLE ' || schema_ || '.' || new_table_ || ' DROP COLUMN temp_id;';
+
+    --drop the temporary table
+    EXECUTE 'DROP TABLE ' || temp_table_ || ';';
+
     RETURN 't';
+
+EXCEPTION
+    EXECUTE 'DROP TABLE ' || temp_table_ || ';';
+    
 END $func$ LANGUAGE plpgsql;
 ALTER FUNCTION tdgMultiToSingle(REGCLASS,TEXT,TEXT,INTEGER,BOOLEAN) OWNER TO gis;
 CREATE OR REPLACE FUNCTION tdgShortestPathVerts (   linktable_ REGCLASS,
@@ -2160,23 +2181,16 @@ BEGIN
     RETURN 't';
 END $func$ LANGUAGE plpgsql;
 ALTER FUNCTION tdgCalculateStress(REGCLASS,BOOLEAN,BOOLEAN,BOOLEAN,INT[]) OWNER TO gis;
-CREATE OR REPLACE FUNCTION tdgTableDetails(input_table REGCLASS)
-RETURNS RECORD AS $func$
-
-DECLARE
-    tabledetails RECORD;
+CREATE OR REPLACE FUNCTION tdgTableDetails(input_table TEXT)
+RETURNS TABLE (schema_name TEXT, table_name TEXT) AS $func$
 
 BEGIN
-    EXECUTE format ('
-        SELECT  nspname::TEXT AS schema_name,
-                relname::TEXT AS table_name
+    RETURN QUERY EXECUTE '
+        SELECT  nspname::TEXT, relname::TEXT
         FROM    pg_namespace n JOIN pg_class c ON n.oid = c.relnamespace
-        WHERE   c.oid = %L::regclass
-        ',  input_table) INTO tabledetails;
-
-    RETURN tabledetails;
+        WHERE   c.oid = to_regclass(' || quote_literal(input_table) || ')';
 END $func$ LANGUAGE plpgsql;
-ALTER FUNCTION tdgTableDetails(REGCLASS) OWNER TO gis;
+ALTER FUNCTION tdgTableDetails(TEXT) OWNER TO gis;
 CREATE OR REPLACE FUNCTION tdgTriggerDoNothing ()
 RETURNS TRIGGER
 AS $BODY$

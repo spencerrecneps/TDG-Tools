@@ -6,6 +6,7 @@ CREATE OR REPLACE FUNCTION tdgMultiToSingle (   temp_table_ REGCLASS,
 RETURNS BOOLEAN AS $func$
 
 DECLARE
+    namecheck TEXT;
     columndetails RECORD;
     newcolumnname TEXT;
 
@@ -16,6 +17,16 @@ BEGIN
     --drop table if overwrite
     IF overwrite_ THEN
         EXECUTE 'DROP TABLE IF EXISTS ' || schema_ || '.' || new_table_ || ';';
+    ELSE
+        RAISE NOTICE 'Checking whether table % exists',new_table_;
+        EXECUTE '   SELECT  table_name
+                    FROM    tdgTableDetails($1)'
+        USING   new_table_
+        INTO    namecheck;
+
+        IF NOT namecheck IS NULL THEN
+            RAISE EXCEPTION 'Table % already exists', new_table_;
+        END IF;
     END IF;
 
     --create new table
@@ -56,6 +67,16 @@ BEGIN
         END IF;
     END LOOP;
 
+    --drop the temp_id column
+    EXECUTE 'ALTER TABLE ' || schema_ || '.' || new_table_ || ' DROP COLUMN temp_id;';
+
+    --drop the temporary table
+    EXECUTE 'DROP TABLE ' || temp_table_ || ';';
+
     RETURN 't';
+
+EXCEPTION
+    EXECUTE 'DROP TABLE ' || temp_table_ || ';';
+    
 END $func$ LANGUAGE plpgsql;
 ALTER FUNCTION tdgMultiToSingle(REGCLASS,TEXT,TEXT,INTEGER,BOOLEAN) OWNER TO gis;
