@@ -25,6 +25,8 @@ __copyright__ = '(C) 2015, Spencer Gardner'
 
 __revision__ = '$Format:%H$'
 
+import string
+import random
 from PyQt4.QtCore import QSettings
 from qgis.core import *
 
@@ -153,6 +155,7 @@ class ImportRoadLayer(GeoAlgorithm):
         crsId = self.getParameterValue(self.TARGET_CRS)
         targetCrs = QgsCoordinateReferenceSystem()
         targetCrs.createFromUserInput(crsId)
+        pgSrid = targetCrs.postgisSrid()
 
         ##########################
         # And now we can process #
@@ -162,6 +165,37 @@ class ImportRoadLayer(GeoAlgorithm):
         # first create the schema if it doesn't exist
         processing.runalg("qgis:postgisexecutesql",database,
             "CREATE SCHEMA IF NOT EXISTS " + schema)
+
+        # set up the temporary table and import the raw data
+        tempTableName = ''.join(random.sample(string.lowercase,10))
+        #processing.runalg("qgis:importintopostgis",database,tempTableName,schema,
+        #    roadsLayer,False,True,'geom',True,True,None)
+        processing.runalg("qgis:importintopostgis",roadsLayer,self.getParameterValue(self.DATABASE),
+            schema,tempTableName,None,'geom',False,True,True,True)
+
+        # move the temp table to its final location
+        # need to parse the crsId to get rid of the EPSG: part
+        processing.runalg("qgis:postgisexecutesql",database,
+            "SELECT tdgMultiToSingle(\'" + tempTableName + "\',\
+                \'" + table + "\',\
+                \'" + schema + "\',\
+                " + str(pgSrid) + ",\
+                " + str(overwrite) + ")")
+        '''
+        # change the geom column type to linestring in the target crs
+        processing.runalg("qgis:postgisexecutesql",database
+            "ALTER TABLE " + table + " \
+             ALTER COLUMN geom \
+             TYPE geometry(linestring," + str(crsId) + ")")
+
+        # set up a uuid field called tdg_id
+        processing.runalg("qgis:postgisexecutesql",database
+            "ALTER TABLE " + table + " \
+             ADD COLUMN tdg_id TEXT NOT NULL\
+             DEFAULT uuid_generate_v4()::TEXT")
+
+        processing.runalg("qgis:postgisexecutesql",database
+            )
 
         # set up the new table's uri
         uri = QgsDataSourceURI()
@@ -221,3 +255,4 @@ class ImportRoadLayer(GeoAlgorithm):
         else:
             geometries.append(geom)
         return geometries
+'''

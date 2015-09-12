@@ -1,7 +1,7 @@
 directory = 'extension'
 default_version = '0.2'
 comment = 'SQL tools for TDG analyses'
-requires = 'postgis'
+requires = 'postgis,uuid-ossp'
 superuser = true
 relocatable = false
 schema = 'tdg'
