@@ -89,8 +89,11 @@ class ImportRoadLayer(GeoAlgorithm):
             self.tr('Database (connection name)'), self.DB_CONNECTIONS))
 
         # Schema name
-        self.addParameter(ParameterString(self.SCHEMANAME,
-            self.tr('Schema'),default='received',optional=False))
+        self.SCHEMA_NAMES = ['generated','received','scratch']
+        self.addParameter(ParameterSelection(self.SCHEMANAME,
+            self.tr('Schema'), self.SCHEMA_NAMES))
+        #self.addParameter(ParameterString(self.SCHEMANAME,
+        #    self.tr('Schema'),default='received',optional=False))
 
         # Table name
         self.addParameter(ParameterString(self.TABLENAME,
@@ -128,7 +131,8 @@ class ImportRoadLayer(GeoAlgorithm):
                 self.tr('Bad database connection name: %s' % connection))
 
         # schema name
-        schema = self.getParameterValue(self.SCHEMANAME).strip().lower()
+        schema = self.SCHEMA_NAMES[self.getParameterValue(self.SCHEMANAME)]
+        #schema = self.getParameterValue(self.SCHEMANAME).strip().lower()
 
         # table name
         table = self.getParameterValue(self.TABLENAME).strip().lower()
