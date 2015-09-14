@@ -7,6 +7,7 @@ RETURNS BOOLEAN AS $func$
 
 DECLARE
     namecheck TEXT;
+    primarykeycolumn TEXT;
     columndetails RECORD;
     newcolumnname TEXT;
 
@@ -21,7 +22,7 @@ BEGIN
         RAISE NOTICE 'Checking whether table % exists',new_table_;
         EXECUTE '   SELECT  table_name
                     FROM    tdgTableDetails($1)'
-        USING   new_table_
+        USING   quote_ident(schema_) || '.' || quot_ident(new_table_)
         INTO    namecheck;
 
         IF NOT namecheck IS NULL THEN
@@ -29,21 +30,37 @@ BEGIN
         END IF;
     END IF;
 
+    --get temp table primary key column name
+    EXECUTE '
+        SELECT a.attname
+        FROM   pg_index i
+        JOIN   pg_attribute a
+                    ON a.attrelid = i.indrelid
+                    AND a.attnum = ANY(i.indkey)
+        WHERE  i.indrelid = $1::regclass
+        AND    i.indisprimary;'
+    USING   schema_ || '.' || temp_table_
+    INTO    primarykeycolumn;
+
     --create new table
+    RAISE NOTICE 'Creating table %',new_table_;
     EXECUTE '   CREATE TABLE ' || schema_ || '.' || new_table_ || '
-                    (   id SERIAL PRIMARY KEY,
+                    ( ' || primarykeycolumn || ' SERIAL PRIMARY KEY,
                         temp_id INTEGER,
                         tdg_id TEXT NOT NULL DEFAULT uuid_generate_v4()::TEXT,
                         geom geometry(LINESTRING,' || srid_::TEXT || '));';
 
     --insert info from temporary table
     EXECUTE '   INSERT INTO ' || schema_ || '.' || new_table_ || ' (temp_id,geom)
-                SELECT id,ST_Transform((ST_Dump(geom)).geom,$1)
+                SELECT ' || primarykeycolumn || ',ST_Transform((ST_Dump(geom)).geom,$1)
                 FROM ' || temp_table_ || ';'
     USING   srid_;
 
+
     --copy table structure from temporary table
     RAISE NOTICE 'Copying table structure from %', temp_table_;
+
+    --loop through temp table columns
     FOR columndetails IN
     EXECUTE '
         SELECT  a.attname AS col,
@@ -53,17 +70,17 @@ BEGIN
         AND     NOT a.attisdropped
         AND     a.attrelid = ' || quote_literal(temp_table_) || '::REGCLASS;'
     LOOP
-        IF columndetails.col NOT IN ('id','geom','tdg_id') THEN
+        IF columndetails.col NOT IN (primarykeycolumn,'geom','tdg_id') THEN
             --sanitize column name
             newcolumnname := regexp_replace(LOWER(columndetails.col), '[^a-zA-Z_]', '', 'g');
-            EXECUTE '   ALTER TABLE ' || new_table_ || '
+            EXECUTE '   ALTER TABLE ' || schema_ || '.' || new_table_ || '
                         ADD COLUMN ' || newcolumnname || ' ' || columndetails.datatype || ';';
 
             --copy data over
-            EXECUTE '   UPDATE ' || new_table_ || '
+            EXECUTE '   UPDATE ' || schema_ || '.' || new_table_ || '
                         SET ' || newcolumnname || ' = t.' || quote_ident(columndetails.col) || '
                         FROM ' || temp_table_ || ' t
-                        WHERE t.id = ' || new_table_ || '.temp_id;';
+                        WHERE t.id = ' || schema_ || '.' || new_table_ || '.temp_id;';
         END IF;
     END LOOP;
 
@@ -75,8 +92,5 @@ BEGIN
 
     RETURN 't';
 
-EXCEPTION
-    EXECUTE 'DROP TABLE ' || temp_table_ || ';';
-    
 END $func$ LANGUAGE plpgsql;
 ALTER FUNCTION tdgMultiToSingle(REGCLASS,TEXT,TEXT,INTEGER,BOOLEAN) OWNER TO gis;

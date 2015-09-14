@@ -1,20 +1,20 @@
-CREATE OR REPLACE FUNCTION tdgStandardizeRoadLayer( input_table REGCLASS,
-                                                    output_table TEXT,
-                                                    id_field TEXT,
-                                                    name_field TEXT,
-                                                    adt_field TEXT,
-                                                    speed_field TEXT,
-                                                    func_field TEXT,
-                                                    oneway_field TEXT,
-                                                    overwrite BOOLEAN,
-                                                    delete_source BOOLEAN)
+CREATE OR REPLACE FUNCTION tdgStandardizeRoadLayer( input_table_ REGCLASS,
+                                                    output_table_name_ TEXT,
+                                                    id_field_ TEXT,
+                                                    name_field_ TEXT,
+                                                    adt_field_ TEXT,
+                                                    speed_field_ TEXT,
+                                                    func_field_ TEXT,
+                                                    oneway_field_ TEXT,
+                                                    overwrite_ BOOLEAN,
+                                                    delete_source_ BOOLEAN)
 RETURNS BOOLEAN AS $func$
 
 DECLARE
-    namecheck record;
-    schemaname TEXT;
-    tabname TEXT;
-    outtabname TEXT;
+    schema_name TEXT;
+    table_name TEXT;
+    road_table TEXT;
+    intersection_table TEXT;
     query TEXT;
     srid INT;
 
@@ -23,39 +23,35 @@ BEGIN
 
     --get schema
     BEGIN
-        RAISE NOTICE 'Checking % exists',input_table;
-        EXECUTE '   SELECT  schema_name,
-                            table_name
-                    FROM    tdgTableDetails('||quote_literal(input_table)||') AS (schema_name TEXT, table_name TEXT)' INTO namecheck;
-        schemaname=namecheck.schema_name;
-        tabname=namecheck.table_name;
-        IF schemaname IS NULL OR tabname IS NULL THEN
-            RAISE NOTICE '-------> % not found',input_table;
-            RETURN 'f';
-        ELSE
-            RAISE NOTICE '  -----> OK';
-        END IF;
+        RAISE NOTICE 'Getting table details for %',input_table_;
+        EXECUTE '   SELECT  schema_name, table_name
+                    FROM    tdgTableDetails($1::TEXT)'
+        USING   input_table_
+        INTO    schema_name, table_name;
 
-        outtabname = schemaname||'.'||output_table;
+        road_table = schema_name||'.'||output_table_name_;
+        intersection_table = road_table || '_intersections';
     END;
 
     --get srid of the geom
     BEGIN
-        EXECUTE format('SELECT tdgGetSRID(to_regclass(%L),%s)',tabname,quote_literal('geom')) INTO srid;
+        EXECUTE 'SELECT tdgGetSRID($1,$2);'
+        USING   input_table_,
+                quote_literal('geom')
+        INTO    srid;
 
         IF srid IS NULL THEN
-            RAISE NOTICE 'ERROR: Can not determine the srid of the geometry in table %', t_name;
-            RETURN 'f';
+            RAISE EXCEPTION 'ERROR: Cannot determine the srid of the geometry in table %', t_name;
         END IF;
-        raise DEBUG '  -----> SRID found %',srid;
+        raise NOTICE '  -----> SRID found %',srid;
     END;
 
     --drop new table if exists
     BEGIN
-        IF overwrite THEN
-            RAISE NOTICE 'DROPPING TABLE %', output_table;
-            EXECUTE format('DROP TABLE IF EXISTS %s',output_table);
-            EXECUTE format('DROP TABLE IF EXISTS %s',output_table||'_intersections');
+        IF overwrite_ THEN
+            RAISE NOTICE 'DROPPING TABLE %', output_table_name_;
+            EXECUTE 'DROP TABLE IF EXISTS '||quote_literal(road_table)||';';
+            EXECUTE 'DROP TABLE IF EXISTS '||quote_literal(intersection_table) || ';';
         END IF;
     END;
 
@@ -113,54 +109,54 @@ BEGIN
                                 tf_cross_lanes INT,
                                 tf_cross_stress_override INT,
                                 tf_cross_stress INT)
-            ',  outtabname,
+            ',  road_table,
                 srid);
     END;
 
     --copy features over
     BEGIN
         query := '';
-        query := '   INSERT INTO ' || outtabname || ' (geom';
+        query := '   INSERT INTO ' || road_table || ' (geom';
         query := query || ',source_data';
-        IF name_field IS NOT NULL THEN
+        IF name_field_ IS NOT NULL THEN
             query := query || ',road_name';
             END IF;
-        IF id_field IS NOT NULL THEN
+        IF id_field_ IS NOT NULL THEN
             query := query || ',source_id';
             END IF;
-        IF func_field IS NOT NULL THEN
+        IF func_field_ IS NOT NULL THEN
             query := query || ',functional_class';
             END IF;
-        IF oneway_field IS NOT NULL THEN
+        IF oneway_field_ IS NOT NULL THEN
             query := query || ',one_way';
             END IF;
-        IF speed_field IS NOT NULL THEN
+        IF speed_field_ IS NOT NULL THEN
             query := query || ',speed_limit';
             END IF;
-        IF adt_field IS NOT NULL THEN
+        IF adt_field_ IS NOT NULL THEN
             query := query || ',adt';
             END IF;
         query := query || ') SELECT ST_SnapToGrid(r.geom,2)';
-        query := query || ',' || quote_literal(tabname);
-        IF name_field IS NOT NULL THEN
-            query := query || ',' || quote_ident(name_field);
+        query := query || ',' || quote_literal(table_name);
+        IF name_field_ IS NOT NULL THEN
+            query := query || ',' || quote_ident(name_field_);
             END IF;
-        IF id_field IS NOT NULL THEN
-            query := query || ',' || quote_ident(id_field);
+        IF id_field_ IS NOT NULL THEN
+            query := query || ',' || quote_ident(id_field_);
             END IF;
-        IF func_field IS NOT NULL THEN
-            query := query || ',' || quote_ident(func_field);
+        IF func_field_ IS NOT NULL THEN
+            query := query || ',' || quote_ident(func_field_);
             END IF;
-        IF oneway_field IS NOT NULL THEN
-            query := query || ',' || quote_ident(oneway_field);
+        IF oneway_field_ IS NOT NULL THEN
+            query := query || ',' || quote_ident(oneway_field_);
             END IF;
-        IF speed_field IS NOT NULL THEN
-            query := query || ',' || quote_ident(speed_field);
+        IF speed_field_ IS NOT NULL THEN
+            query := query || ',' || quote_ident(speed_field_);
             END IF;
-        IF adt_field IS NOT NULL THEN
-            query := query || ',' || quote_ident(adt_field);
+        IF adt_field_ IS NOT NULL THEN
+            query := query || ',' || quote_ident(adt_field_);
             END IF;
-        query := query || ' FROM ' ||tabname|| ' r';
+        query := query || ' FROM ' ||table_name|| ' r';
 
         EXECUTE query;
     END;
@@ -172,22 +168,22 @@ BEGIN
             CREATE INDEX idx_%s_oneway ON %s (one_way);
             CREATE INDEX idx_%s_sourceid ON %s (source_id);
             CREATE INDEX idx_%s_funcclass ON %s (functional_class);
-            ',  output_table,
-                outtabname,
-                output_table,
-                outtabname,
-                output_table,
-                outtabname,
-                output_table,
-                outtabname);
+            ',  output_table_name_,
+                road_table,
+                output_table_name_,
+                road_table,
+                output_table_name_,
+                road_table,
+                output_table_name_,
+                road_table);
     END;
 
     BEGIN
-        EXECUTE format('ANALYZE %s;', output_table);
+        EXECUTE format('ANALYZE %s;', output_table_name_);
     END;
 
     BEGIN
-        PERFORM tdgMakeIntersections(outtabname::REGCLASS);
+        PERFORM tdgMakeIntersections(road_table::REGCLASS);
     END;
 
     --intersection indexes
@@ -195,14 +191,14 @@ BEGIN
         EXECUTE format('
             CREATE INDEX idx_%s_intfrom ON %s (intersection_from);
             CREATE INDEX idx_%s_intto ON %s (intersection_to);
-            ',  output_table,
-                outtabname,
-                output_table,
-                outtabname);
+            ',  output_table_name_,
+                road_table,
+                output_table_name_,
+                road_table);
     END;
 
     BEGIN
-        EXECUTE format('ANALYZE %s;', output_table);
+        EXECUTE format('ANALYZE %s;', output_table_name_);
     END;
 
     --not null on intersections
@@ -210,8 +206,8 @@ BEGIN
         EXECUTE format('
             ALTER TABLE %s ALTER COLUMN intersection_from SET NOT NULL;
             ALTER TABLE %s ALTER COLUMN intersection_to SET NOT NULL;
-            ',  outtabname,
-                outtabname);
+            ',  road_table,
+                road_table);
     END;
 
     --triggers
@@ -221,15 +217,15 @@ BEGIN
                 BEFORE UPDATE OF geom ON %s
                 FOR EACH ROW
                 EXECUTE PROCEDURE tdgUpdateIntersections();
-            ',  output_table,
-                output_table);
+            ',  output_table_name_,
+                output_table_name_);
         EXECUTE format('
             CREATE TRIGGER tdg%sGeomIntersectionAddDel
                 BEFORE INSERT OR DELETE ON %s
                 FOR EACH ROW
                 EXECUTE PROCEDURE tdgUpdateIntersections();
-            ',  output_table,
-                output_table);
+            ',  output_table_name_,
+                output_table_name_);
     END;
 
     RETURN 't';

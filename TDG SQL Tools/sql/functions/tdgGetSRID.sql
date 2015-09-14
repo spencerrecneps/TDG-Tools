@@ -5,13 +5,14 @@ DECLARE
     geomdetails RECORD;
 
 BEGIN
-    EXECUTE format ('
-        SELECT  ST_SRID(%s) AS srid
-        FROM    %s
-        WHERE   %s IS NOT NULL LIMIT 1
-        ',  geom_name,
-            input_table,
-            geom_name) INTO geomdetails;
+    EXECUTE '
+        SELECT  ST_SRID('|| geom_name || ') AS srid
+        FROM    ' || input_table || '
+        WHERE   $1 IS NOT NULL LIMIT 1'
+    USING   --geom_name,
+            --input_table,
+            geom_name
+    INTO    geomdetails;
 
     RETURN geomdetails.srid;
 END $func$ LANGUAGE plpgsql;

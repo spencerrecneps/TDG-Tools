@@ -5,7 +5,6 @@ RETURNS BOOLEAN AS $func$
 DECLARE
     schema_name text;
     table_name text;
-    namecheck record;
     query text;
     sourcetable text;
     verttable text;
@@ -22,18 +21,11 @@ BEGIN
 
     --check table and schema
     BEGIN
-        RAISE NOTICE 'Checking % exists',input_table;
-        EXECUTE '   SELECT  schema_name,
-                            table_name
-                    FROM    tdgTableDetails('||quote_literal(input_table)||') AS (schema_name TEXT, table_name TEXT)' INTO namecheck;
-        schema_name=namecheck.schema_name;
-        table_name=namecheck.table_name;
-        IF schema_name IS NULL OR table_name IS NULL THEN
-    	    RAISE NOTICE '-------> % not found',input_table;
-            RETURN 'f';
-        ELSE
-    	    RAISE NOTICE '  -----> OK';
-        END IF;
+        RAISE NOTICE 'Getting table details for %',input_table;
+        EXECUTE '   SELECT  schema_name, table_name
+                    FROM    tdgTableDetails($1)'
+        USING   input_table
+        INTO    schema_name, table_name;
 
         sourcetable = schema_name || '.' || table_name;
         verttable = schema_name || '.' || table_name || '_net_vert';
