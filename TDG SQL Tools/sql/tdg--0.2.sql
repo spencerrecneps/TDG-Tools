@@ -570,7 +570,7 @@ BEGIN
         RAISE NOTICE 'Checking whether table % exists',new_table_;
         EXECUTE '   SELECT  table_name
                     FROM    tdgTableDetails($1)'
-        USING   quote_ident(schema_) || '.' || quot_ident(new_table_)
+        USING   schema_ || '.' || new_table_
         INTO    namecheck;
 
         IF NOT namecheck IS NULL THEN
