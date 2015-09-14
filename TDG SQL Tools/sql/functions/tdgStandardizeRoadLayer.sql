@@ -1,4 +1,5 @@
 CREATE OR REPLACE FUNCTION tdgStandardizeRoadLayer( input_table_ REGCLASS,
+                                                    output_schema_ TEXT,
                                                     output_table_name_ TEXT,
                                                     id_field_ TEXT,
                                                     name_field_ TEXT,
@@ -11,33 +12,56 @@ CREATE OR REPLACE FUNCTION tdgStandardizeRoadLayer( input_table_ REGCLASS,
 RETURNS BOOLEAN AS $func$
 
 DECLARE
-    schema_name TEXT;
+    namecheck RECORD;
+    input_schema TEXT;
     table_name TEXT;
     road_table TEXT;
     intersection_table TEXT;
-    query TEXT;
+    querytext TEXT;
     srid INT;
 
 BEGIN
     raise notice 'PROCESSING:';
 
-    --get schema
-    BEGIN
-        RAISE NOTICE 'Getting table details for %',input_table_;
-        EXECUTE '   SELECT  schema_name, table_name
-                    FROM    tdgTableDetails($1::TEXT)'
-        USING   input_table_
-        INTO    schema_name, table_name;
+    --create schema if needed
+    EXECUTE 'CREATE SCHEMA IF NOT EXISTS ' || output_schema_ || ';';
 
-        road_table = schema_name||'.'||output_table_name_;
-        intersection_table = road_table || '_intersections';
-    END;
+    --set output tables
+    road_table = output_schema_ || '.' || output_table_name_;
+    intersection_table = road_table || '_intersections';
+
+    --drop table if overwrite
+    IF overwrite_ THEN
+        EXECUTE 'DROP TABLE IF EXISTS ' || road_table ';';
+        EXECUTE 'DROP TABLE IF EXISTS ' || intersection_table ';';
+    ELSE
+        RAISE NOTICE 'Checking whether table % exists',road_table;
+        EXECUTE '   SELECT  table_name
+                    FROM    tdgTableDetails($1)'
+        USING   road_table
+        INTO    namecheck;
+
+        IF NOT namecheck IS NULL THEN
+            RAISE EXCEPTION 'Table % already exists', road_table;
+        END IF;
+
+        RAISE NOTICE 'Checking whether table % exists',intersection_table;
+        EXECUTE '   SELECT  table_name
+                    FROM    tdgTableDetails($1)'
+        USING   intersection_table
+        INTO    namecheck;
+
+        IF NOT namecheck IS NULL THEN
+            RAISE EXCEPTION 'Table % already exists', intersection_table;
+        END IF;
+    END IF;
 
     --get srid of the geom
     BEGIN
+        RAISE NOTICE 'Getting SRID of geometry';
         EXECUTE 'SELECT tdgGetSRID($1,$2);'
         USING   input_table_,
-                quote_literal('geom')
+                'geom'
         INTO    srid;
 
         IF srid IS NULL THEN
@@ -46,17 +70,9 @@ BEGIN
         raise NOTICE '  -----> SRID found %',srid;
     END;
 
-    --drop new table if exists
-    BEGIN
-        IF overwrite_ THEN
-            RAISE NOTICE 'DROPPING TABLE %', output_table_name_;
-            EXECUTE 'DROP TABLE IF EXISTS '||quote_literal(road_table)||';';
-            EXECUTE 'DROP TABLE IF EXISTS '||quote_literal(intersection_table) || ';';
-        END IF;
-    END;
-
     --create new table
     BEGIN
+        RAISE NOTICE 'Creating table %', road_table;
         EXECUTE format('
             CREATE TABLE %s (   id SERIAL PRIMARY KEY,
                                 geom geometry(linestring,%L),
@@ -115,50 +131,69 @@ BEGIN
 
     --copy features over
     BEGIN
-        query := '';
-        query := '   INSERT INTO ' || road_table || ' (geom';
-        query := query || ',source_data';
+        RAISE NOTICE 'Copying features to %', road_table;
+        --querytext := '';
+        querytext := '   INSERT INTO ' || road_table || ' (geom';
+        RAISE NOTICE 'Query is %', querytext;
+        querytext := querytext || ',source_data';
+        RAISE NOTICE 'Query is %', querytext;
         IF name_field_ IS NOT NULL THEN
-            query := query || ',road_name';
+            querytext := querytext || ',road_name';
             END IF;
+        RAISE NOTICE 'Query is %', querytext;
         IF id_field_ IS NOT NULL THEN
-            query := query || ',source_id';
+            querytext := querytext || ',source_id';
             END IF;
+        RAISE NOTICE 'Query is %', querytext;
         IF func_field_ IS NOT NULL THEN
-            query := query || ',functional_class';
+            querytext := querytext || ',functional_class';
             END IF;
+        RAISE NOTICE 'Query is %', querytext;
         IF oneway_field_ IS NOT NULL THEN
-            query := query || ',one_way';
+            querytext := querytext || ',one_way';
             END IF;
+        RAISE NOTICE 'Query is %', querytext;
         IF speed_field_ IS NOT NULL THEN
-            query := query || ',speed_limit';
+            querytext := querytext || ',speed_limit';
             END IF;
+        RAISE NOTICE 'Query is %', querytext;
         IF adt_field_ IS NOT NULL THEN
-            query := query || ',adt';
+            querytext := querytext || ',adt';
             END IF;
-        query := query || ') SELECT ST_SnapToGrid(r.geom,2)';
-        query := query || ',' || quote_literal(table_name);
+        RAISE NOTICE 'Query is %', querytext;
+        querytext := querytext || ') SELECT ST_SnapToGrid(r.geom,2)';
+        RAISE NOTICE 'Query is %', querytext;
+        querytext := querytext || ',' || quote_literal(input_table_);
+        RAISE NOTICE 'Query is %', querytext;
         IF name_field_ IS NOT NULL THEN
-            query := query || ',' || quote_ident(name_field_);
+            querytext := querytext || ',' || quote_ident(name_field_);
             END IF;
+        RAISE NOTICE 'Query is %', querytext;
         IF id_field_ IS NOT NULL THEN
-            query := query || ',' || quote_ident(id_field_);
+            querytext := querytext || ',' || quote_ident(id_field_);
             END IF;
+        RAISE NOTICE 'Query is %', querytext;
         IF func_field_ IS NOT NULL THEN
-            query := query || ',' || quote_ident(func_field_);
+            querytext := querytext || ',' || quote_ident(func_field_);
             END IF;
+        RAISE NOTICE 'Query is %', querytext;
         IF oneway_field_ IS NOT NULL THEN
-            query := query || ',' || quote_ident(oneway_field_);
+            querytext := querytext || ',' || quote_ident(oneway_field_);
             END IF;
+        RAISE NOTICE 'Query is %', querytext;
         IF speed_field_ IS NOT NULL THEN
-            query := query || ',' || quote_ident(speed_field_);
+            querytext := querytext || ',' || quote_ident(speed_field_);
             END IF;
+        RAISE NOTICE 'Query is %', querytext;
         IF adt_field_ IS NOT NULL THEN
-            query := query || ',' || quote_ident(adt_field_);
+            querytext := querytext || ',' || quote_ident(adt_field_);
             END IF;
-        query := query || ' FROM ' ||table_name|| ' r';
+        RAISE NOTICE 'Query is %', querytext;
+        querytext := querytext || ' FROM ' ||input_table_|| ' r';
+        RAISE NOTICE 'Query is %', querytext;
 
-        EXECUTE query;
+        RAISE NOTICE 'Query is %', querytext;
+        EXECUTE querytext;
     END;
 
     --indexes
@@ -179,7 +214,7 @@ BEGIN
     END;
 
     BEGIN
-        EXECUTE format('ANALYZE %s;', output_table_name_);
+        EXECUTE format('ANALYZE %s;',road_table);
     END;
 
     BEGIN
@@ -198,7 +233,7 @@ BEGIN
     END;
 
     BEGIN
-        EXECUTE format('ANALYZE %s;', output_table_name_);
+        EXECUTE format('ANALYZE %s;',road_table);
     END;
 
     --not null on intersections
@@ -230,5 +265,5 @@ BEGIN
 
     RETURN 't';
 END $func$ LANGUAGE plpgsql;
-ALTER FUNCTION tdgStandardizeRoadLayer( REGCLASS,TEXT,TEXT,TEXT,TEXT,TEXT,
+ALTER FUNCTION tdgStandardizeRoadLayer( REGCLASS,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,
                                         TEXT,TEXT,BOOLEAN,BOOLEAN) OWNER TO gis;

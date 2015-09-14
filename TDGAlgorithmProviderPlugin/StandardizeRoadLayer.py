@@ -35,6 +35,7 @@ from processing.core.parameters import ParameterVector
 from processing.core.parameters import ParameterString
 from processing.core.parameters import ParameterTableField
 from processing.core.parameters import ParameterBoolean
+from processing.core.parameters import ParameterSelection
 
 from processing.tools import dataobjects
 from processing.algs.qgis import postgis_utils
@@ -51,6 +52,7 @@ class StandardizeRoadLayer(GeoAlgorithm):
     # used when calling the algorithm from another algorithm, or when
     # calling from the QGIS console.
 
+    SCHEMA_NAME = 'SCHEMA_NAME'
     TABLE_NAME = 'TABLE_NAME'
     ROADS_LAYER = 'ROADS_LAYER'
     ID_FIELD = 'ID_FIELD'
@@ -74,6 +76,11 @@ class StandardizeRoadLayer(GeoAlgorithm):
         # The branch of the toolbox under which the algorithm will appear
         #self.group = 'Algorithms for vector layers'
         self.group = 'Data Management'
+
+        # schema for new table
+        self.SCHEMA_NAMES = ['generated','received','scratch']
+        self.addParameter(ParameterSelection(self.SCHEMA_NAME,
+            self.tr('Schema'), self.SCHEMA_NAMES))
 
         # name for new table
         # mandatory
@@ -141,6 +148,7 @@ class StandardizeRoadLayer(GeoAlgorithm):
 
     def processAlgorithm(self, progress):
         # Retrieve the values of the parameters entered by the user
+        schema = self.SCHEMA_NAMES[self.getParameterValue(self.SCHEMA_NAME)]
         tableName = self.getParameterValue(self.TABLE_NAME).strip().lower()
         inLayer = dataobjects.getObjectFromUri(self.getParameterValue(self.ROADS_LAYER))
         fieldIdOrig = self.getParameterValue(self.ID_FIELD)

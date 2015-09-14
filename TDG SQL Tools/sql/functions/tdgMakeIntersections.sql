@@ -16,7 +16,7 @@ BEGIN
     BEGIN
         RAISE NOTICE 'Getting table details for %',input_table;
         EXECUTE '   SELECT  schema_name, table_name
-                    FROM    tdgTableDetails($1)'
+                    FROM    tdgTableDetails($1::TEXT)'
         USING   input_table
         INTO    schema_name, table_name;
 
