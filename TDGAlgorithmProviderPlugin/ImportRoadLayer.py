@@ -92,8 +92,6 @@ class ImportRoadLayer(GeoAlgorithm):
         self.SCHEMA_NAMES = ['generated','received','scratch']
         self.addParameter(ParameterSelection(self.SCHEMANAME,
             self.tr('Schema'), self.SCHEMA_NAMES))
-        #self.addParameter(ParameterString(self.SCHEMANAME,
-        #    self.tr('Schema'),default='received',optional=False))
 
         # Table name
         self.addParameter(ParameterString(self.TABLENAME,
@@ -132,7 +130,6 @@ class ImportRoadLayer(GeoAlgorithm):
 
         # schema name
         schema = self.SCHEMA_NAMES[self.getParameterValue(self.SCHEMANAME)]
-        #schema = self.getParameterValue(self.SCHEMANAME).strip().lower()
 
         # table name
         table = self.getParameterValue(self.TABLENAME).strip().lower()
