@@ -164,7 +164,7 @@ class ImportRoadLayer(GeoAlgorithm):
         #linestrings = processing.runalg('qgis:multiparttosingleparts')
 
         # first create the schema if it doesn't exist
-        processing.runalg("qgis:postgisexecutesql",database,
+        processing.runalg("qgis:postgisexecutesql",connection,
             "CREATE SCHEMA IF NOT EXISTS " + schema)
 
         # set up the temporary table and import the raw data
@@ -177,14 +177,14 @@ class ImportRoadLayer(GeoAlgorithm):
 
         # move the temp table to its final location
         # need to parse the crsId to get rid of the EPSG: part
-        processing.runalg("qgis:postgisexecutesql",database,
+        processing.runalg("qgis:postgisexecutesql",connection,
             "SELECT tdgMultiToSingle(\'" + tempTableName + "\',\
                 \'" + table + "\',\
                 \'" + schema + "\',\
                 " + str(pgSrid) + ",\
                 " + str(overwrite) + ")")
 
-        processing.runalg("qgis:postgisexecutesql",database,
+        processing.runalg("qgis:postgisexecutesql",connection,
             "ANALYZE " + schema + "." + table)
 
         # set up the new table's uri
