@@ -1,14 +1,15 @@
-CREATE OR REPLACE FUNCTION tdgStandardizeRoadLayer( input_table_ REGCLASS,
-                                                    output_schema_ TEXT,
-                                                    output_table_name_ TEXT,
-                                                    id_field_ TEXT,
-                                                    name_field_ TEXT,
-                                                    adt_field_ TEXT,
-                                                    speed_field_ TEXT,
-                                                    func_field_ TEXT,
-                                                    oneway_field_ TEXT,
-                                                    overwrite_ BOOLEAN,
-                                                    delete_source_ BOOLEAN)
+CREATE OR REPLACE FUNCTION tdg.tdgStandardizeRoadLayer(
+    input_table_ REGCLASS,
+    output_schema_ TEXT,
+    output_table_name_ TEXT,
+    id_field_ TEXT,
+    name_field_ TEXT,
+    adt_field_ TEXT,
+    speed_field_ TEXT,
+    func_field_ TEXT,
+    oneway_field_ TEXT,
+    overwrite_ BOOLEAN,
+    delete_source_ BOOLEAN)
 RETURNS BOOLEAN AS $func$
 
 DECLARE
@@ -32,8 +33,8 @@ BEGIN
 
     --drop table if overwrite
     IF overwrite_ THEN
-        EXECUTE 'DROP TABLE IF EXISTS ' || road_table ';';
-        EXECUTE 'DROP TABLE IF EXISTS ' || intersection_table ';';
+        EXECUTE 'DROP TABLE IF EXISTS ' || road_table || ';';
+        EXECUTE 'DROP TABLE IF EXISTS ' || intersection_table || ';';
     ELSE
         RAISE NOTICE 'Checking whether table % exists',road_table;
         EXECUTE '   SELECT  table_name
@@ -265,5 +266,6 @@ BEGIN
 
     RETURN 't';
 END $func$ LANGUAGE plpgsql;
-ALTER FUNCTION tdgStandardizeRoadLayer( REGCLASS,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,
-                                        TEXT,TEXT,BOOLEAN,BOOLEAN) OWNER TO gis;
+ALTER FUNCTION tdg.tdgStandardizeRoadLayer(
+    REGCLASS,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,
+    TEXT,TEXT,BOOLEAN,BOOLEAN) OWNER TO gis;
