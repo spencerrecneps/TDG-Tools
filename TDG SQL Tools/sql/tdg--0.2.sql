@@ -566,11 +566,12 @@ BEGIN
 RETURN 't';
 END $func$ LANGUAGE plpgsql;
 ALTER FUNCTION tdgTableCheck(REGCLASS) OWNER TO gis;
-CREATE OR REPLACE FUNCTION tdgMultiToSingle (   temp_table_ REGCLASS,
-                                                new_table_ TEXT,
-                                                schema_ TEXT,
-                                                srid_ INTEGER,
-                                                overwrite_ BOOLEAN)
+CREATE OR REPLACE FUNCTION tdg.tdgMultiToSingle (
+    temp_table_ REGCLASS,
+    new_table_ TEXT,
+    schema_ TEXT,
+    srid_ INTEGER,
+    overwrite_ BOOLEAN)
 RETURNS BOOLEAN AS $func$
 
 DECLARE
@@ -578,6 +579,9 @@ DECLARE
     primarykeycolumn TEXT;
     columndetails RECORD;
     newcolumnname TEXT;
+    columncount INT;
+    addstatement TEXT;
+    copystatement TEXT;
 
 BEGIN
     --create schema if needed
@@ -599,6 +603,7 @@ BEGIN
     END IF;
 
     --get temp table primary key column name
+    RAISE NOTICE 'Getting primary key from %', temp_table_;
     EXECUTE '
         SELECT a.attname
         FROM   pg_index i
@@ -628,7 +633,10 @@ BEGIN
     --copy table structure from temporary table
     RAISE NOTICE 'Copying table structure from %', temp_table_;
 
-    --loop through temp table columns
+    --loop through temp table columns and build statements to copy data
+    columncount := 0;
+    addstatement := 'ALTER TABLE ' || schema_ || '.' || new_table_ || ' ';
+    copystatement := 'UPDATE ' || schema_ || '.' || new_table_ || ' SET ';
     FOR columndetails IN
     EXECUTE '
         SELECT  a.attname AS col,
@@ -639,29 +647,59 @@ BEGIN
         AND     a.attrelid = ' || quote_literal(temp_table_) || '::REGCLASS;'
     LOOP
         IF columndetails.col NOT IN (primarykeycolumn,'geom','tdg_id') THEN
+            RAISE NOTICE 'Found column %', columndetails.col;
+            --advance count
+            columncount := columncount + 1;
+
             --sanitize column name
-            newcolumnname := regexp_replace(LOWER(columndetails.col), '[^a-zA-Z_]', '', 'g');
-            EXECUTE '   ALTER TABLE ' || schema_ || '.' || new_table_ || '
-                        ADD COLUMN ' || newcolumnname || ' ' || columndetails.datatype || ';';
+            newcolumnname := regexp_replace(LOWER(columndetails.col), '[^a-zA-Z0-9_]', '', 'g');
+            -- EXECUTE '   ALTER TABLE ' || schema_ || '.' || new_table_ || '
+            --             ADD COLUMN ' || newcolumnname || ' ' || columndetails.datatype || ';';
+            IF columncount = 1 THEN
+                addstatement := addstatement || ' ADD COLUMN '
+                                || newcolumnname || ' '
+                                || columndetails.datatype;
+            ELSE
+                addstatement := addstatement || ', ADD COLUMN '
+                                || newcolumnname || ' '
+                                || columndetails.datatype;
+            END IF;
 
             --copy data over
-            EXECUTE '   UPDATE ' || schema_ || '.' || new_table_ || '
-                        SET ' || newcolumnname || ' = t.' || quote_ident(columndetails.col) || '
-                        FROM ' || temp_table_ || ' t
-                        WHERE t.id = ' || schema_ || '.' || new_table_ || '.temp_id;';
+            -- EXECUTE '   UPDATE ' || schema_ || '.' || new_table_ || '
+            --             SET ' || newcolumnname || ' = t.' || quote_ident(columndetails.col) || '
+            --             FROM ' || temp_table_ || ' t
+            --             WHERE t.id = ' || schema_ || '.' || new_table_ || '.temp_id;';
+            IF columncount = 1 THEN
+                copystatement := copystatement || newcolumnname || '=t.'
+                                || quote_ident(columndetails.col);
+            ELSE
+                copystatement := copystatement || ',' || newcolumnname || '=t.'
+                                || quote_ident(columndetails.col);
+            END IF;
         END IF;
     END LOOP;
 
+    copystatement := copystatement || ' FROM ' || temp_table_ || ' t WHERE t.'
+        || primarykeycolumn || ' = ' || schema_ || '.' || new_table_ || '.temp_id;';
+
+    RAISE NOTICE 'Adding columns';
+    EXECUTE addstatement;
+    RAISE NOTICE 'Copying data';
+    EXECUTE copystatement;
+
     --drop the temp_id column
+    RAISE NOTICE 'Dropping temoporary ID column';
     EXECUTE 'ALTER TABLE ' || schema_ || '.' || new_table_ || ' DROP COLUMN temp_id;';
 
     --drop the temporary table
+    RAISE NOTICE 'Dropping temoporary table';
     EXECUTE 'DROP TABLE ' || temp_table_ || ';';
 
     RETURN 't';
 
 END $func$ LANGUAGE plpgsql;
-ALTER FUNCTION tdgMultiToSingle(REGCLASS,TEXT,TEXT,INTEGER,BOOLEAN) OWNER TO gis;
+ALTER FUNCTION tdg.tdgMultiToSingle(REGCLASS,TEXT,TEXT,INTEGER,BOOLEAN) OWNER TO gis;
 CREATE OR REPLACE FUNCTION tdgShortestPathVerts (   linktable_ REGCLASS,
                                                     verttable_ REGCLASS,
                                                     from_ INT,
@@ -1306,17 +1344,18 @@ USING   linktable_,
 --followed by empty RETURN???
 END $func$ LANGUAGE plpgsql;
 ALTER FUNCTION tdgShortestPathIntersections(REGCLASS,REGCLASS,REGCLASS,INT,INT,INT) OWNER TO gis;
-CREATE OR REPLACE FUNCTION tdgStandardizeRoadLayer( input_table_ REGCLASS,
-                                                    output_schema_ TEXT,
-                                                    output_table_name_ TEXT,
-                                                    id_field_ TEXT,
-                                                    name_field_ TEXT,
-                                                    adt_field_ TEXT,
-                                                    speed_field_ TEXT,
-                                                    func_field_ TEXT,
-                                                    oneway_field_ TEXT,
-                                                    overwrite_ BOOLEAN,
-                                                    delete_source_ BOOLEAN)
+CREATE OR REPLACE FUNCTION tdg.tdgStandardizeRoadLayer(
+    input_table_ REGCLASS,
+    output_schema_ TEXT,
+    output_table_name_ TEXT,
+    id_field_ TEXT,
+    name_field_ TEXT,
+    adt_field_ TEXT,
+    speed_field_ TEXT,
+    func_field_ TEXT,
+    oneway_field_ TEXT,
+    overwrite_ BOOLEAN,
+    delete_source_ BOOLEAN)
 RETURNS BOOLEAN AS $func$
 
 DECLARE
@@ -1573,8 +1612,9 @@ BEGIN
 
     RETURN 't';
 END $func$ LANGUAGE plpgsql;
-ALTER FUNCTION tdgStandardizeRoadLayer( REGCLASS,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,
-                                        TEXT,TEXT,BOOLEAN,BOOLEAN) OWNER TO gis;
+ALTER FUNCTION tdg.tdgStandardizeRoadLayer(
+    REGCLASS,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,
+    TEXT,TEXT,BOOLEAN,BOOLEAN) OWNER TO gis;
 CREATE OR REPLACE FUNCTION tdgMakeIntersections (input_table REGCLASS)
 RETURNS BOOLEAN AS $func$
 
