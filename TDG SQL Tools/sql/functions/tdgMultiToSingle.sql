@@ -85,8 +85,6 @@ BEGIN
 
             --sanitize column name
             newcolumnname := regexp_replace(LOWER(columndetails.col), '[^a-zA-Z0-9_]', '', 'g');
-            -- EXECUTE '   ALTER TABLE ' || schema_ || '.' || new_table_ || '
-            --             ADD COLUMN ' || newcolumnname || ' ' || columndetails.datatype || ';';
             IF columncount = 1 THEN
                 addstatement := addstatement || ' ADD COLUMN '
                                 || newcolumnname || ' '
@@ -98,10 +96,6 @@ BEGIN
             END IF;
 
             --copy data over
-            -- EXECUTE '   UPDATE ' || schema_ || '.' || new_table_ || '
-            --             SET ' || newcolumnname || ' = t.' || quote_ident(columndetails.col) || '
-            --             FROM ' || temp_table_ || ' t
-            --             WHERE t.id = ' || schema_ || '.' || new_table_ || '.temp_id;';
             IF columncount = 1 THEN
                 copystatement := copystatement || newcolumnname || '=t.'
                                 || quote_ident(columndetails.col);

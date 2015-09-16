@@ -135,65 +135,47 @@ BEGIN
         RAISE NOTICE 'Copying features to %', road_table;
         --querytext := '';
         querytext := '   INSERT INTO ' || road_table || ' (geom';
-        RAISE NOTICE 'Query is %', querytext;
         querytext := querytext || ',source_data';
-        RAISE NOTICE 'Query is %', querytext;
         IF name_field_ IS NOT NULL THEN
             querytext := querytext || ',road_name';
             END IF;
-        RAISE NOTICE 'Query is %', querytext;
         IF id_field_ IS NOT NULL THEN
             querytext := querytext || ',source_id';
             END IF;
-        RAISE NOTICE 'Query is %', querytext;
         IF func_field_ IS NOT NULL THEN
             querytext := querytext || ',functional_class';
             END IF;
-        RAISE NOTICE 'Query is %', querytext;
         IF oneway_field_ IS NOT NULL THEN
             querytext := querytext || ',one_way';
             END IF;
-        RAISE NOTICE 'Query is %', querytext;
         IF speed_field_ IS NOT NULL THEN
             querytext := querytext || ',speed_limit';
             END IF;
-        RAISE NOTICE 'Query is %', querytext;
         IF adt_field_ IS NOT NULL THEN
             querytext := querytext || ',adt';
             END IF;
-        RAISE NOTICE 'Query is %', querytext;
         querytext := querytext || ') SELECT ST_SnapToGrid(r.geom,2)';
-        RAISE NOTICE 'Query is %', querytext;
         querytext := querytext || ',' || quote_literal(input_table_);
-        RAISE NOTICE 'Query is %', querytext;
         IF name_field_ IS NOT NULL THEN
             querytext := querytext || ',' || quote_ident(name_field_);
             END IF;
-        RAISE NOTICE 'Query is %', querytext;
         IF id_field_ IS NOT NULL THEN
             querytext := querytext || ',' || quote_ident(id_field_);
             END IF;
-        RAISE NOTICE 'Query is %', querytext;
         IF func_field_ IS NOT NULL THEN
             querytext := querytext || ',' || quote_ident(func_field_);
             END IF;
-        RAISE NOTICE 'Query is %', querytext;
         IF oneway_field_ IS NOT NULL THEN
             querytext := querytext || ',' || quote_ident(oneway_field_);
             END IF;
-        RAISE NOTICE 'Query is %', querytext;
         IF speed_field_ IS NOT NULL THEN
             querytext := querytext || ',' || quote_ident(speed_field_);
             END IF;
-        RAISE NOTICE 'Query is %', querytext;
         IF adt_field_ IS NOT NULL THEN
             querytext := querytext || ',' || quote_ident(adt_field_);
             END IF;
-        RAISE NOTICE 'Query is %', querytext;
         querytext := querytext || ' FROM ' ||input_table_|| ' r';
-        RAISE NOTICE 'Query is %', querytext;
 
-        RAISE NOTICE 'Query is %', querytext;
         EXECUTE querytext;
     END;
 
