@@ -4,6 +4,8 @@ CREATE OR REPLACE FUNCTION tdg.tdgStandardizeRoadLayer(
     output_table_name_ TEXT,
     id_field_ TEXT,
     name_field_ TEXT,
+    z_from_field_ TEXT,
+    z_to_field_ TEXT,
     adt_field_ TEXT,
     speed_field_ TEXT,
     func_field_ TEXT,
@@ -75,11 +77,13 @@ BEGIN
     BEGIN
         RAISE NOTICE 'Creating table %', road_table;
         EXECUTE format('
-            CREATE TABLE %s (   id SERIAL PRIMARY KEY,
+            CREATE TABLE %s (   road_id SERIAL PRIMARY KEY,
                                 geom geometry(linestring,%L),
                                 road_name TEXT,
                                 road_from TEXT,
                                 road_to TEXT,
+                                z_from INT DEFAULT 0,
+                                z_to INT DEFAULT 0,
                                 intersection_from INT,
                                 intersection_to INT,
                                 source_data TEXT,
@@ -154,6 +158,12 @@ BEGIN
         IF adt_field_ IS NOT NULL THEN
             querytext := querytext || ',adt';
             END IF;
+        IF z_from_field_ IS NOT NULL THEN
+            querytext := querytext || ',z_from';
+            END IF;
+        IF z_to_field_ IS NOT NULL THEN
+            querytext := querytext || ',z_to';
+            END IF;
         querytext := querytext || ') SELECT ST_SnapToGrid(r.geom,2)';
         querytext := querytext || ',' || quote_literal(input_table_);
         IF name_field_ IS NOT NULL THEN
@@ -174,6 +184,12 @@ BEGIN
         IF adt_field_ IS NOT NULL THEN
             querytext := querytext || ',' || quote_ident(adt_field_);
             END IF;
+        IF z_from_field_ IS NOT NULL THEN
+            querytext := querytext || ',' || quote_ident(z_from_field_);
+            END IF;
+        IF z_to_field_ IS NOT NULL THEN
+            querytext := querytext || ',' || quote_ident(z_to_field_);
+            END IF;
         querytext := querytext || ' FROM ' ||input_table_|| ' r';
 
         EXECUTE querytext;
@@ -186,7 +202,13 @@ BEGIN
             CREATE INDEX idx_%s_oneway ON %s (one_way);
             CREATE INDEX idx_%s_sourceid ON %s (source_id);
             CREATE INDEX idx_%s_funcclass ON %s (functional_class);
+            CREATE INDEX idx_%s_zf ON %s (z_from);
+            CREATE INDEX idx_%s_zt ON %s (z_to);
             ',  output_table_name_,
+                road_table,
+                output_table_name_,
+                road_table,
+                output_table_name_,
                 road_table,
                 output_table_name_,
                 road_table,
@@ -201,7 +223,12 @@ BEGIN
     END;
 
     BEGIN
-        PERFORM tdgMakeIntersections(road_table::REGCLASS);
+        IF z_from_field_ IS NOT NULL AND z_to_field_ IS NOT NULL THEN
+            PERFORM tdgMakeIntersections(road_table::REGCLASS,'t'::BOOLEAN);
+        ELSE
+            PERFORM tdgMakeIntersections(road_table::REGCLASS,'f'::BOOLEAN);
+        END IF;
+
     END;
 
     --intersection indexes
@@ -230,18 +257,20 @@ BEGIN
 
     --triggers
     BEGIN
+        --road geom changes
         EXECUTE format('
             CREATE TRIGGER tdg%sGeomIntersectionUpdate
-                BEFORE UPDATE OF geom ON %s
+                AFTER UPDATE OF geom, z_from, z_to ON %s
                 FOR EACH ROW
-                EXECUTE PROCEDURE tdgUpdateIntersections();
+                EXECUTE PROCEDURE tdgRoadGeomChange();
             ',  output_table_name_,
                 output_table_name_);
+        --road insert or delete
         EXECUTE format('
             CREATE TRIGGER tdg%sGeomIntersectionAddDel
-                BEFORE INSERT OR DELETE ON %s
+                AFTER INSERT OR DELETE ON %s
                 FOR EACH ROW
-                EXECUTE PROCEDURE tdgUpdateIntersections();
+                EXECUTE PROCEDURE tdgRoadGeomChange();
             ',  output_table_name_,
                 output_table_name_);
     END;
@@ -249,5 +278,5 @@ BEGIN
     RETURN 't';
 END $func$ LANGUAGE plpgsql;
 ALTER FUNCTION tdg.tdgStandardizeRoadLayer(
-    REGCLASS,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,
-    TEXT,TEXT,BOOLEAN,BOOLEAN) OWNER TO gis;
+    REGCLASS,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,
+    TEXT,TEXT,TEXT,BOOLEAN,BOOLEAN) OWNER TO gis;

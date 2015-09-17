@@ -1344,6 +1344,8 @@ CREATE OR REPLACE FUNCTION tdg.tdgStandardizeRoadLayer(
     output_table_name_ TEXT,
     id_field_ TEXT,
     name_field_ TEXT,
+    z_from_field_ TEXT,
+    z_to_field_ TEXT,
     adt_field_ TEXT,
     speed_field_ TEXT,
     func_field_ TEXT,
@@ -1415,11 +1417,13 @@ BEGIN
     BEGIN
         RAISE NOTICE 'Creating table %', road_table;
         EXECUTE format('
-            CREATE TABLE %s (   id SERIAL PRIMARY KEY,
+            CREATE TABLE %s (   road_id SERIAL PRIMARY KEY,
                                 geom geometry(linestring,%L),
                                 road_name TEXT,
                                 road_from TEXT,
                                 road_to TEXT,
+                                z_from INT,
+                                z_to INT,
                                 intersection_from INT,
                                 intersection_to INT,
                                 source_data TEXT,
@@ -1494,6 +1498,12 @@ BEGIN
         IF adt_field_ IS NOT NULL THEN
             querytext := querytext || ',adt';
             END IF;
+        IF z_from_field_ IS NOT NULL THEN
+            querytext := querytex || ',z_from';
+            END IF;
+        IF z_to_field_ IS NOT NULL THEN
+            querytext := querytex || ',z_to';
+            END IF;
         querytext := querytext || ') SELECT ST_SnapToGrid(r.geom,2)';
         querytext := querytext || ',' || quote_literal(input_table_);
         IF name_field_ IS NOT NULL THEN
@@ -1514,6 +1524,12 @@ BEGIN
         IF adt_field_ IS NOT NULL THEN
             querytext := querytext || ',' || quote_ident(adt_field_);
             END IF;
+        IF z_from_field_ IS NOT NULL THEN
+            querytext := querytext || ',' || quote_ident(z_from_field_);
+            END IF;
+        IF z_to_field_ IS NOT NULL THEN
+            querytext := querytext || ',' || quote_ident(z_to_field_);
+            END IF;
         querytext := querytext || ' FROM ' ||input_table_|| ' r';
 
         EXECUTE querytext;
@@ -1526,7 +1542,13 @@ BEGIN
             CREATE INDEX idx_%s_oneway ON %s (one_way);
             CREATE INDEX idx_%s_sourceid ON %s (source_id);
             CREATE INDEX idx_%s_funcclass ON %s (functional_class);
+            CREATE INDEX idx_%s_zf ON %s (z_from);
+            CREATE INDEX idx_%s_zt ON %s (z_to);
             ',  output_table_name_,
+                road_table,
+                output_table_name_,
+                road_table,
+                output_table_name_,
                 road_table,
                 output_table_name_,
                 road_table,
@@ -1541,7 +1563,12 @@ BEGIN
     END;
 
     BEGIN
-        PERFORM tdgMakeIntersections(road_table::REGCLASS);
+        IF z_from_field_ IS NOT NULL AND z_to_field_ IS NOT NULL THEN
+            PERFORM tdgMakeIntersections(road_table::REGCLASS,'t'::BOOLEAN);
+        ELSE
+            PERFORM tdgMakeIntersections(road_table::REGCLASS,'f'::BOOLEAN);
+        END IF;
+
     END;
 
     --intersection indexes
@@ -1589,9 +1616,11 @@ BEGIN
     RETURN 't';
 END $func$ LANGUAGE plpgsql;
 ALTER FUNCTION tdg.tdgStandardizeRoadLayer(
-    REGCLASS,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,
-    TEXT,TEXT,BOOLEAN,BOOLEAN) OWNER TO gis;
-CREATE OR REPLACE FUNCTION tdgMakeIntersections (input_table REGCLASS)
+    REGCLASS,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,
+    TEXT,TEXT,TEXT,BOOLEAN,BOOLEAN) OWNER TO gis;
+CREATE OR REPLACE FUNCTION tdg.tdgMakeIntersections (
+    input_table_ REGCLASS,
+    z_vals_ BOOLEAN DEFAULT 'f')
 RETURNS BOOLEAN AS $func$
 
 DECLARE
@@ -1600,17 +1629,17 @@ DECLARE
     table_name TEXT;
     inttable text;
     sridinfo record;
-    srid int;
+    srid INT;
 
 BEGIN
     RAISE NOTICE 'PROCESSING:';
 
     --check table and schema
     BEGIN
-        RAISE NOTICE 'Getting table details for %',input_table;
+        RAISE NOTICE 'Getting table details for %',input_table_;
         EXECUTE '   SELECT  schema_name, table_name
                     FROM    tdgTableDetails($1::TEXT)'
-        USING   input_table
+        USING   input_table_
         INTO    schema_name, table_name;
 
         inttable = schema_name || '.' || table_name || '_intersections';
@@ -1618,40 +1647,49 @@ BEGIN
 
     --get srid of the geom
     BEGIN
-        EXECUTE format('SELECT tdgGetSRID(to_regclass(%L),%s)',input_table,quote_literal('geom')) INTO srid;
+        RAISE NOTICE 'Getting SRID of geometry';
+        EXECUTE 'SELECT tdgGetSRID($1,$2);'
+        USING   input_table_,
+                'geom'
+        INTO    srid;
 
         IF srid IS NULL THEN
-            RAISE EXCEPTION 'Could not determine SRID of ', input_table;
+            RAISE EXCEPTION 'ERROR: Cannot determine the srid of the geometry in table %', t_name;
         END IF;
-        RAISE NOTICE '  -----> SRID found %',srid;
+        raise NOTICE '  -----> SRID found %',srid;
     END;
 
     BEGIN
         RAISE NOTICE 'creating intersection table';
         EXECUTE format('
-            CREATE TABLE %s (   id serial PRIMARY KEY,
+            CREATE TABLE %s (   int_id serial PRIMARY KEY,
                                 geom geometry(point,%L),
+                                z_elev INT NOT NULL DEFAULT 0,
                                 legs INT,
                                 signalized BOOLEAN);
             ',  inttable,
                 srid);
     END;
 
+    --add intersections to table
     BEGIN
         RAISE NOTICE 'adding intersections';
-        EXECUTE format('
-            CREATE TEMP TABLE v (i INT, geom geometry(point,%L)) ON COMMIT DROP;
-            INSERT INTO v (i, geom) SELECT id, ST_StartPoint(geom) FROM %s ORDER BY id ASC;
-            INSERT INTO v (i, geom) SELECT id, ST_EndPoint(geom) FROM %s ORDER BY id ASC;
-            INSERT INTO %s (legs, geom)
-            SELECT      COUNT(i),
-                        geom
-            FROM        v
-            GROUP BY    geom;
-            ',  srid,
-                input_table,
-                input_table,
-                inttable);
+
+        EXECUTE '
+            CREATE TEMP TABLE v (i INT, z INT, geom geometry(POINT,$1)) ON COMMIT DROP;
+            INSERT INTO v (i, z, geom)
+                SELECT      road_id, z_from, ST_StartPoint(geom)
+                FROM        ' || input_table_ || '
+                ORDER BY    road_id ASC;
+            INSERT INTO v (i, z, geom)
+                SELECT      road_id, z_to, ST_EndPoint(geom)
+                FROM        ' || input_table_ || '
+                ORDER BY    road_id ASC;
+            INSERT INTO ' || inttable || ' (legs, z, geom)
+                SELECT      COUNT(i), z, geom
+                FROM        v
+                GROUP BY    z, geom;'
+        USING   srid;
     END;
 
     EXECUTE format('ANALYZE %s;', inttable);
@@ -1661,17 +1699,17 @@ BEGIN
         RAISE NOTICE 'populating intersection data in roads table';
         EXECUTE format('
             UPDATE  %s
-            SET     intersection_from = if.id,
-                    intersection_to = it.id
+            SET     intersection_from = if.int_id,
+                    intersection_to = it.int_id
             FROM    %s if,
                     %s it
             WHERE   ST_StartPoint(%s.geom) = if.geom
             and     ST_EndPoint(%s.geom) = it.geom;
-            ',  input_table,
+            ',  input_table_,
                 inttable,
                 inttable,
-                input_table,
-                input_table);
+                input_table_,
+                input_table_);
     END;
 
     --triggers
@@ -1694,7 +1732,7 @@ BEGIN
 
     RETURN 't';
 END $func$ LANGUAGE plpgsql;
-ALTER FUNCTION tdgMakeIntersections(REGCLASS) OWNER TO gis;
+ALTER FUNCTION tdg.tdgMakeIntersections(REGCLASS,BOOLEAN) OWNER TO gis;
 CREATE OR REPLACE FUNCTION tdgGenerateIntersectionStreets (input_table REGCLASS, intids INT[])
 RETURNS BOOLEAN AS $func$
 

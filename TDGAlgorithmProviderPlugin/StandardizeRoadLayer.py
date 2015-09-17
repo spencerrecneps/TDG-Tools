@@ -55,6 +55,8 @@ class StandardizeRoadLayer(GeoAlgorithm):
     SCHEMA_NAME = 'SCHEMA_NAME'
     TABLE_NAME = 'TABLE_NAME'
     ROADS_LAYER = 'ROADS_LAYER'
+    Z_FROM_FIELD = 'Z_FROM_FIELD'
+    Z_TO_FIELD = 'Z_TO_FIELD'
     ID_FIELD = 'ID_FIELD'
     NAME_FIELD = 'NAME_FIELD'
     ADT_FIELD = 'ADT_FIELD'
@@ -91,6 +93,20 @@ class StandardizeRoadLayer(GeoAlgorithm):
         # It is a mandatory (not optional) one, hence the False argument
         self.addParameter(ParameterVector(self.ROADS_LAYER,
             self.tr('Roads layer'), [ParameterVector.VECTOR_TYPE_LINE], optional=False))
+
+        # Field with z elev values
+        # Optional field
+        self.addParameter(ParameterTableField(self.Z_FROM_FIELD,
+            self.tr('Intersection Z (elevation) value at segment starting point'),
+            parent=self.ROADS_LAYER,
+            optional=True))
+
+        # Field with z elev values
+        # Optional field
+        self.addParameter(ParameterTableField(self.Z_TO_FIELD,
+            self.tr('Intersection Z (elevation) value at segment ending point'),
+            parent=self.ROADS_LAYER,
+            optional=True))
 
         # Source ID field in the roads data
         # Optional field
@@ -151,6 +167,8 @@ class StandardizeRoadLayer(GeoAlgorithm):
         schema = self.SCHEMA_NAMES[self.getParameterValue(self.SCHEMA_NAME)]
         tableName = self.getParameterValue(self.TABLE_NAME).strip().lower()
         inLayer = dataobjects.getObjectFromUri(self.getParameterValue(self.ROADS_LAYER))
+        fieldZFrom = self.getParameterValue(self.Z_FROM_FIELD)
+        fieldZTo = self.getParameterValue(self.Z_TO_FIELD)
         fieldIdOrig = self.getParameterValue(self.ID_FIELD)
         fieldName = self.getParameterValue(self.NAME_FIELD)
         fieldADT = self.getParameterValue(self.ADT_FIELD)
@@ -192,6 +210,7 @@ class StandardizeRoadLayer(GeoAlgorithm):
 
         sql = 'select tdgStandardizeRoadLayer('
         sql = sql + "'" + roadsDb.getTable() + "',"
+        sql = sql + "'" + schema + "',"
         sql = sql + "'" + tableName + "',"
         if fieldIdOrig is None:
             sql = sql + 'NULL,'
@@ -201,6 +220,14 @@ class StandardizeRoadLayer(GeoAlgorithm):
             sql = sql + 'NULL,'
         else:
             sql = sql + "'" + fieldName + "',"
+        if fieldZFrom is None:
+            sql = sql + 'NULL,'
+        else:
+            sql = sql + "'" + fieldZFrom + "',"
+        if fieldZTo is None:
+            sql = sql + 'NULL,'
+        else:
+            sql = sql + "'" + fieldZTo + "',"
         if fieldADT is None:
             sql = sql + 'NULL,'
         else:
@@ -249,7 +276,7 @@ class StandardizeRoadLayer(GeoAlgorithm):
             # add roads layer
             uri = QgsDataSourceURI()
             uri.setConnection(dbHost,str(dbPort),dbName,dbUser,dbPass)
-            uri.setDataSource(dbSchema,tableName,'geom','','id')
+            uri.setDataSource(schema,tableName,'geom','','id')
             uri.setSrid(str(dbSRID))
             uri.setWkbType(QGis.WKBLineString)
             layer = QgsVectorLayer(uri.uri(),tableName,'postgres')
@@ -258,7 +285,7 @@ class StandardizeRoadLayer(GeoAlgorithm):
             # add the intersections layer
             tableName = tableName + '_intersections'
             uri.setConnection(dbHost,str(dbPort),dbName,dbUser,dbPass)
-            uri.setDataSource(dbSchema,tableName,'geom','','id')
+            uri.setDataSource(schema,tableName,'geom','','id')
             uri.setWkbType(QGis.WKBPoint)
             layer = QgsVectorLayer(uri.uri(),tableName,'postgres')
             mapReg.addMapLayer(layer)
