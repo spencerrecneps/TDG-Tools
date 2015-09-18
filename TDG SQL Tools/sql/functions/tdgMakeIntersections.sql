@@ -1,4 +1,4 @@
-CREATE OR REPLACE FUNCTION tdgMakeIntersections (input_table REGCLASS)
+CREATE OR REPLACE FUNCTION tdg.tdgMakeIntersections (input_table REGCLASS)
 RETURNS BOOLEAN AS $func$
 
 DECLARE
@@ -25,7 +25,10 @@ BEGIN
 
     --get srid of the geom
     BEGIN
-        EXECUTE format('SELECT tdgGetSRID(to_regclass(%L),%s)',input_table,quote_literal('geom')) INTO srid;
+        EXECUTE 'SELECT tdgGetSRID($1,$2);'
+        USING   input_table,
+                'geom'
+        INTO    srid;
 
         IF srid IS NULL THEN
             RAISE EXCEPTION 'Could not determine SRID of ', input_table;
@@ -101,4 +104,4 @@ BEGIN
 
     RETURN 't';
 END $func$ LANGUAGE plpgsql;
-ALTER FUNCTION tdgMakeIntersections(REGCLASS) OWNER TO gis;
+ALTER FUNCTION tdg.tdgMakeIntersections(REGCLASS) OWNER TO gis;
