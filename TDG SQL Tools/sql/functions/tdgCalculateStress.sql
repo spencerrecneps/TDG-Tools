@@ -1,8 +1,9 @@
-CREATE OR REPLACE FUNCTION tdgCalculateStress(  input_table_ REGCLASS,
-                                                seg_ BOOLEAN,
-                                                approach_ BOOLEAN,
-                                                cross_ BOOLEAN,
-                                                ids_ INT[] DEFAULT NULL)
+CREATE OR REPLACE FUNCTION tdg.tdgCalculateStress(
+    input_table_ REGCLASS,
+    seg_ BOOLEAN,
+    approach_ BOOLEAN,
+    cross_ BOOLEAN,
+    ids_ INT[] DEFAULT NULL)
 --calculate stress score
 RETURNS BOOLEAN AS $func$
 
@@ -70,7 +71,7 @@ BEGIN
                 SET     ft_seg_stress=( SELECT      stress
                                         FROM        %s s
                                         WHERE       %s.speed_limit <= s.speed
-                                        AND         %s.adt <= s.adt
+                                        AND         COALESCE(%s.adt,0) <= s.adt
                                         AND         COALESCE(%s.ft_seg_lanes_thru,1) <= s.lanes
                                         ORDER BY    s.stress ASC
                                         LIMIT       1)
@@ -88,7 +89,7 @@ BEGIN
                 SET     tf_seg_stress=( SELECT      stress
                                         FROM        %s s
                                         WHERE       %s.speed_limit <= s.speed
-                                        AND         %s.adt <= s.adt
+                                        AND         COALESCE(%s.adt,0) <= s.adt
                                         AND         COALESCE(%s.tf_seg_lanes_thru,1) <= s.lanes
                                         ORDER BY    s.stress ASC
                                         LIMIT       1)
@@ -418,4 +419,4 @@ BEGIN
 
     RETURN 't';
 END $func$ LANGUAGE plpgsql;
-ALTER FUNCTION tdgCalculateStress(REGCLASS,BOOLEAN,BOOLEAN,BOOLEAN,INT[]) OWNER TO gis;
+ALTER FUNCTION tdg.tdgCalculateStress(REGCLASS,BOOLEAN,BOOLEAN,BOOLEAN,INT[]) OWNER TO gis;
