@@ -17,7 +17,7 @@ DECLARE
 BEGIN
     raise notice 'PROCESSING:';
 
-    --get schema
+    --test tables
     BEGIN
         IF cross_ THEN
             stress_cross_w_median := 'stress_cross_w_median'::REGCLASS;
@@ -66,40 +66,30 @@ BEGIN
             RAISE NOTICE 'Calculating segment stress';
 
             -- mixed ft direction
-            EXECUTE format('
-                UPDATE  %s
+            EXECUTE '
+                UPDATE ' || input_table_ || '
                 SET     ft_seg_stress=( SELECT      stress
-                                        FROM        %s s
-                                        WHERE       %s.speed_limit <= s.speed
-                                        AND         COALESCE(%s.adt,0) <= s.adt
-                                        AND         COALESCE(%s.ft_seg_lanes_thru,1) <= s.lanes
+                                        FROM        ' || stress_seg_mixed || ' s
+                                        WHERE       ' || input_table_ || '.speed_limit <= s.speed
+                                        AND         COALESCE(' || input_table_ || '.adt,0) <= s.adt
+                                        AND         COALESCE(' || input_table_ || '.ft_seg_lanes_thru,1) <= s.lanes
                                         ORDER BY    s.stress ASC
                                         LIMIT       1)
                 WHERE   (COALESCE(ft_seg_lanes_bike_wd_ft,0) < 4 AND COALESCE(ft_seg_lanes_park_wd_ft,0) = 0)
-                OR      COALESCE(ft_seg_lanes_bike_wd_ft,0) + COALESCE(ft_seg_lanes_park_wd_ft,0) < 12;
-                ',  input_table_,
-                    'tdg.stress_seg_mixed',
-                    input_table_,
-                    input_table_,
-                    input_table_);
+                OR      COALESCE(ft_seg_lanes_bike_wd_ft,0) + COALESCE(ft_seg_lanes_park_wd_ft,0) < 12;';
 
             -- mixed tf direction
-            EXECUTE format('
-                UPDATE  %s
+            EXECUTE '
+                UPDATE ' || input_table_ || '
                 SET     tf_seg_stress=( SELECT      stress
-                                        FROM        %s s
-                                        WHERE       %s.speed_limit <= s.speed
-                                        AND         COALESCE(%s.adt,0) <= s.adt
-                                        AND         COALESCE(%s.tf_seg_lanes_thru,1) <= s.lanes
+                                        FROM        ' || stress_seg_mixed || ' s
+                                        WHERE       ' || input_table_ || '.speed_limit <= s.speed
+                                        AND         COALESCE(' || input_table_ || '.adt,0) <= s.adt
+                                        AND         COALESCE(' || input_table_ || '.tf_seg_lanes_thru,1) <= s.lanes
                                         ORDER BY    s.stress ASC
                                         LIMIT       1)
                 WHERE   (COALESCE(tf_seg_lanes_bike_wd_ft,0) < 4 AND COALESCE(tf_seg_lanes_park_wd_ft,0) = 0)
-                OR      COALESCE(tf_seg_lanes_bike_wd_ft,0) + COALESCE(tf_seg_lanes_park_wd_ft,0) < 12;
-                ',  input_table_,
-                    'tdg.stress_seg_mixed',
-                    input_table_,
-                    input_table_,
-                    input_table_);
+                OR      COALESCE(tf_seg_lanes_bike_wd_ft,0) + COALESCE(tf_seg_lanes_park_wd_ft,0) < 12;';
 
             -- bike lane no parking ft direction
             EXECUTE format('
