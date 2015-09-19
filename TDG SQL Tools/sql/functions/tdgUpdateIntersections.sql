@@ -3,7 +3,7 @@ CREATE OR REPLACE FUNCTION tdg.tdgUpdateIntersections(
     int_table_ REGCLASS,
     road_ids_ INTEGER[]
 )
-RETURNS TRIGGER
+RETURNS BOOLEAN
 AS $BODY$
 
 --------------------------------------------------------------------------
@@ -24,10 +24,10 @@ BEGIN
         SELECT ARRAY(
             SELECT  intersection_from
             FROM  ' || road_table_ || '
-            WHERE road_id = ANY ($1);
-        )';
-    USING   road_ids_
-    INTO    int_ids;
+            WHERE road_id = ANY ($1)
+        );'
+    INTO    int_ids
+    USING   road_ids_;
 
     --update intersection leg count
     BEGIN
@@ -38,18 +38,18 @@ BEGIN
             UPDATE  ' || int_table_ || '
             SET legs = (SELECT  COUNT(road_id)
                         FROM  ' || road_table_ || ' r
-                        WHERE ' || int_table_ || '.int_id = ANY (int_ids)
+                        WHERE ' || int_table_ || '.int_id = ANY ($1)
                         AND   ' || int_table_ || '.geom = ST_StartPoint(r.geom)
-                        AND   ' || int_table_ || '.z_elev = r.z_from;)'
+                        AND   ' || int_table_ || '.z_elev = r.z_from);'
         USING   int_ids;
         --road end points next
         EXECUTE '
             UPDATE  ' || int_table_ || '
             SET legs = legs + ( SELECT  COUNT(road_id)
                                 FROM  ' || road_table_ || ' r
-                                WHERE ' || int_table_ || '.int_id = ANY (int_ids)
+                                WHERE ' || int_table_ || '.int_id = ANY ($1)
                                 AND   ' || int_table_ || '.geom = ST_EndPoint(r.geom)
-                                AND   ' || int_table_ || '.z_elev = r.z_to;)'
+                                AND   ' || int_table_ || '.z_elev = r.z_to);'
         USING   int_ids;
     END;
 
@@ -80,6 +80,7 @@ BEGIN
     --re-enable triggers on the intersections table
     EXECUTE 'ALTER TABLE ' || int_table_ || ' ENABLE TRIGGER ALL;';
 
+    RETURN 't';
 END;
 $BODY$ LANGUAGE plpgsql;
 ALTER FUNCTION tdg.tdgUpdateIntersections(REGCLASS,REGCLASS,INTEGER[]) OWNER TO gis;

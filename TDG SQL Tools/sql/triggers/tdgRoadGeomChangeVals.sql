@@ -17,164 +17,21 @@ AS $BODY$
 --------------------------------------------------------------------------
 
 DECLARE
+    road_table REGCLASS;
     int_table REGCLASS;
 
 BEGIN
-    --get the intersection table
+    --get the intersection and road tables
+    road_table := TG_TABLE_SCHEMA || '.' || TG_TABLE_NAME;
     int_table := TG_TABLE_SCHEMA || '.' || TG_TABLE_NAME || '_intersections';
 
-
-
-
-    --trigger operation
     IF (TG_OP = 'UPDATE' OR TG_OP = 'INSERT') THEN
-        --snap new geom
         NEW.geom := ST_SnapToGrid(NEW.geom,2);
-
-        -------------------
-        --  START POINT  --
-        -------------------
-        --do nothing if startpoint didn't change
-        IF (TG_OP = 'INSERT'
-            OR NOT (ST_StartPoint(NEW.geom) = ST_StartPoint(OLD.geom))
-            OR NOT (NEW.z_from = OLD.z_from)) THEN
-            -- get new start intersection data if it already exists
-            EXECUTE '
-                SELECT  int_id, geom, legs, z_elev
-                FROM ' || int_table || '
-                WHERE       ST_DWithin(geom,ST_StartPoint($1.geom),5)
-                AND         geom <#> $1.geom <= 5
-                AND         z_elev = $1.z_from
-                ORDER BY    geom <#> ST_StartPoint($1.geom) ASC
-                LIMIT       1;'
-            INTO    startintersection
-            USING   NEW;
-
-            -- insert/update intersections and new record
-            IF startintersection.int_id IS NULL THEN
-                EXECUTE '
-                    INSERT INTO ' || int_table || ' (geom, legs, z_elev)
-                    SELECT ST_StartPoint($1.geom), 1, $1.z_from
-                    RETURNING int_id;'
-                INTO    NEW.intersection_from
-                USING   NEW;
-            ELSE
-                NEW.intersection_from := startintersection.int_id;
-                EXECUTE '
-                    UPDATE ' || int_table || '
-                    SET     legs = COALESCE(legs,0) + 1
-                    WHERE   int_id = $1;'
-                USING   startintersection.int_id;
-            END IF;
-        END IF;
-
-
-        -------------------
-        --   END POINT   --
-        -------------------
-        --do nothing if endpoint didn't change
-        IF (TG_OP = 'INSERT'
-            OR NOT (ST_EndPoint(NEW.geom) = ST_EndPoint(OLD.geom))
-            OR NOT (NEW.z_to = OLD.z_to)) THEN
-            -- get end intersection data if it already exists
-            EXECUTE '
-                SELECT  int_id, geom, legs, z_elev
-                FROM ' || int_table || '
-                WHERE       ST_DWithin(geom,ST_EndPoint($1.geom),5)
-                AND         geom <#> $1.geom <= 5
-                AND         z_elev = $1.z_to
-                ORDER BY    geom <#> ST_EndPoint($1.geom) ASC
-                LIMIT       1;'
-            INTO    endintersection
-            USING   NEW;
-
-            -- insert/update intersections and new record
-            IF endintersection.int_id IS NULL THEN
-                EXECUTE '
-                    INSERT INTO ' || int_table || ' (geom, legs, z_elev)
-                    SELECT ST_EndPoint($1.geom), 1, $1.z_to
-                    RETURNING int_id;'
-                INTO    NEW.intersection_to
-                USING   NEW;
-            ELSE
-                NEW.intersection_to := endintersection.int_id;
-                EXECUTE '
-                    UPDATE ' || int_table || '
-                    SET     legs = COALESCE(legs,0) + 1
-                    WHERE   int_id = $1;'
-                USING   endintersection.int_id;
-            END IF;
-        END IF;
-    END IF;
-
-    IF (TG_OP = 'DELETE' OR TG_OP = 'UPDATE') THEN
-        -------------------
-        --  START POINT  --
-        -------------------
-        --do nothing if startpoint didn't change
-        IF (TG_OP = 'DELETE'
-            OR NOT (ST_StartPoint(NEW.geom) = ST_StartPoint(OLD.geom))
-            OR NOT (NEW.z_from = OLD.z_from)) THEN
-            -- get start intersection legs
-            EXECUTE '
-                SELECT  legs
-                FROM ' || int_table || '
-                WHERE   int_id = $1.intersection_from;'
-            INTO    legs
-            USING   OLD;
-
-            IF legs > 1 THEN
-                EXECUTE '
-                    UPDATE ' || int_table || '
-                    SET     legs = legs - 1
-                    WHERE   int_id = $1.intersection_from;'
-                USING   OLD;
-            ELSE
-                EXECUTE '
-                    DELETE FROM ' || int_table || '
-                    WHERE   int_id = $1.intersection_from;'
-                USING   OLD;
-            END IF;
-        END IF;
-
-
-        -------------------
-        --   END POINT   --
-        -------------------
-        --do nothing if endpoint didn't change
-        IF (TG_OP = 'DELETE'
-            OR NOT (ST_EndPoint(NEW.geom) = ST_EndPoint(OLD.geom))
-            OR NOT (NEW.z_to = OLD.z_to)) THEN
-            -- get end intersection legs
-            EXECUTE '
-                SELECT  legs
-                FROM ' || int_table || '
-                WHERE   int_id = $1.intersection_to;'
-            INTO    legs
-            USING   OLD;
-
-            IF legs > 1 THEN
-                EXECUTE '
-                    UPDATE ' || int_table || '
-                    SET     legs = legs - 1
-                    WHERE   int_id = $1.intersection_to;'
-                USING   OLD;
-            ELSE
-                EXECUTE '
-                    DELETE FROM ' || int_table || '
-                    WHERE   int_id = $1.intersection_to;'
-                USING   OLD;
-            END IF;
-        END IF;
-    END IF;
-
-    --re-enable triggers on the intersections table
-    EXECUTE 'ALTER TABLE ' || int_table || ' ENABLE TRIGGER ALL;';
-
-    IF TG_OP = 'DELETE' THEN
-        RETURN OLD;
-    ELSE
+        INSERT INTO tmp_roadgeomchange (road_id) SELECT NEW.road_id;
         RETURN NEW;
+    ELSEIF TG_OP = 'DELETE' THEN
+        INSERT INTO tmp_roadgeomchange (road_id) SELECT OLD.road_id;
+        RETURN OLD;
     END IF;
 END;
 $BODY$ LANGUAGE plpgsql;

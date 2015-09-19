@@ -272,7 +272,7 @@ BEGIN
         -- populate with vals
         EXECUTE format('
             CREATE TRIGGER tr_tdg%sGeomUpdateVals
-                AFTER UPDATE OF geom, z_from, z_to ON %s
+                BEFORE UPDATE OF geom, z_from, z_to ON %s
                 FOR EACH ROW
                 EXECUTE PROCEDURE tdgRoadGeomChangeVals();
             ',  output_table_name_,
@@ -299,7 +299,7 @@ BEGIN
         -- populate with vals
         EXECUTE format('
             CREATE TRIGGER tr_tdg%sGeomAddDelVals
-                AFTER INSERT OR DELETE ON %s
+                BEFORE INSERT OR DELETE ON %s
                 FOR EACH ROW
                 EXECUTE PROCEDURE tdgRoadGeomChangeVals();
             ',  output_table_name_,
