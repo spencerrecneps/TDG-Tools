@@ -107,14 +107,6 @@ class CalculateStress(GeoAlgorithm):
             raise GeoAlgorithmExecutionException(
                 self.tr("Couldn't connect to database:\n%s" % e.message))
 
-        settings = QSettings()
-        mySettings = '/PostgreSQL/connections/' + dbName
-        try:
-            database = settings.value(mySettings + '/database')
-        except Exception, e:
-            raise GeoAlgorithmExecutionException(
-                self.tr('Wrong database connection name: %s' % connection))
-
         sql = 'select tdgCalculateStress('
         sql = sql + "'" + roadsDb.getTable() + "'"
         if self.SEGMENT:
@@ -131,5 +123,5 @@ class CalculateStress(GeoAlgorithm):
             sql = sql + ",'f'"
         sql = sql + ");"
 
-        processing.runalg("qgis:postgisexecutesql",database,
+        processing.runalg("qgis:postgisexecutesql",dbName,
             sql)

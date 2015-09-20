@@ -99,18 +99,10 @@ class MakeRoadNetwork(GeoAlgorithm):
             raise GeoAlgorithmExecutionException(
                 self.tr("Couldn't connect to database:\n%s" % e.message))
 
-        settings = QSettings()
-        mySettings = '/PostgreSQL/connections/' + dbName
-        try:
-            database = settings.value(mySettings + '/database')
-        except Exception, e:
-            raise GeoAlgorithmExecutionException(
-                self.tr('Wrong database connection name: %s' % connection))
-
         sql = 'select tdgMakeNetwork('
         sql = sql + "'" + roadsDb.getTable() + "');"
 
-        processing.runalg("qgis:postgisexecutesql",database,
+        processing.runalg("qgis:postgisexecutesql",dbName,
             sql)
 
 

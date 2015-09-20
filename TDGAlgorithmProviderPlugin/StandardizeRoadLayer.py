@@ -25,7 +25,7 @@ __copyright__ = '(C) 2015, Spencer Gardner'
 
 __revision__ = '$Format:%H$'
 
-from PyQt4.QtCore import QSettings, QVariant
+from PyQt4.QtCore import QSettings
 from qgis.core import *
 
 import processing
@@ -189,24 +189,15 @@ class StandardizeRoadLayer(GeoAlgorithm):
         dbSchema = roadsDb.getSchema()
         dbType = roadsDb.getType()
         dbSRID = roadsDb.getSRID()
-        # try:
-        #     db = postgis_utils.GeoDB(host=dbHost,
-        #                              port=dbPort,
-        #                              dbname=dbName,
-        #                              user=dbUser,
-        #                              passwd=dbPass)
-        # except postgis_utils.DbError, e:
-        #     raise GeoAlgorithmExecutionException(
-        #         self.tr("Couldn't connect to database:\n%s" % e.message))
-
-
-        settings = QSettings()
-        mySettings = '/PostgreSQL/connections/' + dbName
         try:
-            database = settings.value(mySettings + '/database')
-        except Exception, e:
+            db = postgis_utils.GeoDB(host=dbHost,
+                                     port=dbPort,
+                                     dbname=dbName,
+                                     user=dbUser,
+                                     passwd=dbPass)
+        except postgis_utils.DbError, e:
             raise GeoAlgorithmExecutionException(
-                self.tr('Error connecting to database: %s' % connection))
+                self.tr("Couldn't connect to database:\n%s" % e.message))
 
         sql = 'select tdg.tdgStandardizeRoadLayer('
         sql = sql + "'" + roadsDb.getTable() + "',"
@@ -258,7 +249,7 @@ class StandardizeRoadLayer(GeoAlgorithm):
         '''
         sql = 'select tdgGenerateCrossStreetData('
         sql = sql + "'" + tableName + "');"
-        processing.runalg("qgis:postgisexecutesql",database,
+        processing.runalg("qgis:postgisexecutesql",dbName,
             sql)
         '''
         mapReg = QgsMapLayerRegistry.instance()
