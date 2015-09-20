@@ -10,9 +10,16 @@ AS $BODY$
 --------------------------------------------------------------------------
 
 BEGIN
-    CREATE TEMPORARY TABLE tmp_roadgeomchange (
-        road_id INT NOT NULL
-    ) ON COMMIT DROP;
+    EXECUTE '
+        CREATE TEMPORARY TABLE tmp_roadgeomchange (
+            road_id INTEGER,
+            old_int_from INTEGER,
+            new_int_from INTEGER,
+            old_int_to INTEGER,
+            new_int_to INTEGER
+        )
+        ON COMMIT DROP;';
+
     RETURN NULL;
 END;
 $BODY$ LANGUAGE plpgsql;

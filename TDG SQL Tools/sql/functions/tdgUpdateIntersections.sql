@@ -1,7 +1,6 @@
 CREATE OR REPLACE FUNCTION tdg.tdgUpdateIntersections(
     road_table_ REGCLASS,
-    int_table_ REGCLASS,
-    road_ids_ INTEGER[]
+    int_table_ REGCLASS
 )
 RETURNS BOOLEAN
 AS $BODY$
@@ -11,71 +10,33 @@ AS $BODY$
 -- a set of road_ids passed in as an array.
 --------------------------------------------------------------------------
 
-DECLARE
-    int_ids INTEGER[];
-
 BEGIN
     --suspend triggers on the intersections table so that our
     --changes are not ignored.
     EXECUTE 'ALTER TABLE ' || int_table_ || ' DISABLE TRIGGER ALL;';
 
-    --identify affected intersections
-    EXECUTE '
-        SELECT ARRAY(
-            SELECT  intersection_from
-            FROM  ' || road_table_ || '
-            WHERE road_id = ANY ($1)
-        );'
-    INTO    int_ids
-    USING   road_ids_;
-
     --update intersection leg count
     BEGIN
         RAISE NOTICE 'Updating intersections';
 
-        --road start points first
+        --update intersection leg counts
         EXECUTE '
-            UPDATE  ' || int_table_ || '
-            SET legs = (SELECT  COUNT(road_id)
-                        FROM  ' || road_table_ || ' r
-                        WHERE ' || int_table_ || '.int_id = ANY ($1)
-                        AND   ' || int_table_ || '.geom = ST_StartPoint(r.geom)
-                        AND   ' || int_table_ || '.z_elev = r.z_from);'
-        USING   int_ids;
-        --road end points next
-        EXECUTE '
-            UPDATE  ' || int_table_ || '
-            SET legs = legs + ( SELECT  COUNT(road_id)
-                                FROM  ' || road_table_ || ' r
-                                WHERE ' || int_table_ || '.int_id = ANY ($1)
-                                AND   ' || int_table_ || '.geom = ST_EndPoint(r.geom)
-                                AND   ' || int_table_ || '.z_elev = r.z_to);'
-        USING   int_ids;
+            UPDATE  '||int_table_||'
+            SET     legs = (SELECT  COUNT(roads.road_id)
+                            FROM    '||road_table_||' roads
+                            WHERE   '||int_table_||'.int_id
+                                        IN (roads.intersection_from,roads.intersection_to))
+            WHERE   int_id IN ( SELECT new_int_from FROM tmp_roadgeomchange
+                                UNION
+                                SELECT new_int_to FROM tmp_roadgeomchange
+                                UNION
+                                SELECT old_int_from FROM tmp_roadgeomchange
+                                UNION
+                                SELECT old_int_to FROM tmp_roadgeomchange);';
     END;
 
-    --update from/to intersections on roads
-    BEGIN
-        RAISE NOTICE 'Updating road intersection info';
-
-        --road start points first
-        EXECUTE '
-            UPDATE  ' || road_table_ || '
-            SET intersection_from = ints.int_id
-            FROM    ' || int_table_ || ' ints
-            WHERE   ' || road_table_ || '.road_id = ANY ($1)
-            AND     ST_StartPoint(' || road_table_ || '.geom) = ints.geom
-            AND     ' || road_table_ || '.z_from = ints.z_elev;'
-        USING   road_ids_;
-        --road end points next
-        EXECUTE '
-            UPDATE  ' || road_table_ || '
-            SET intersection_to = ints.int_id
-            FROM    ' || int_table_ || ' ints
-            WHERE   ' || road_table_ || '.road_id = ANY ($1)
-            AND     ST_EndPoint(' || road_table_ || '.geom) = ints.geom
-            AND     ' || road_table_ || '.z_to = ints.z_elev;'
-        USING   road_ids_;
-    END;
+    --delete intersections with no legs
+    EXECUTE 'DELETE FROM ' || int_table_ || ' WHERE legs < 1;';
 
     --re-enable triggers on the intersections table
     EXECUTE 'ALTER TABLE ' || int_table_ || ' ENABLE TRIGGER ALL;';

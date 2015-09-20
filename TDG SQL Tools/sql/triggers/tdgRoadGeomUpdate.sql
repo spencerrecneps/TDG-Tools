@@ -12,17 +12,13 @@ AS $BODY$
 DECLARE
     road_table REGCLASS;
     int_table REGCLASS;
-    road_ids INTEGER[];
 
 BEGIN
     --get the intersection and road tables
     road_table := TG_TABLE_SCHEMA || '.' || TG_TABLE_NAME;
     int_table := TG_TABLE_SCHEMA || '.' || TG_TABLE_NAME || '_intersections';
 
-    EXECUTE 'SELECT ARRAY(SELECT road_id FROM tmp_roadgeomchange);'
-    INTO    road_ids;
-
-    PERFORM tdgUpdateIntersections(road_table,int_table,road_ids);
+    PERFORM tdgUpdateIntersections(road_table,int_table);
 
     DROP TABLE tmp_roadgeomchange;
 
