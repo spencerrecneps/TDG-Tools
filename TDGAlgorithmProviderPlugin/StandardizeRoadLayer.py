@@ -189,15 +189,15 @@ class StandardizeRoadLayer(GeoAlgorithm):
         dbSchema = roadsDb.getSchema()
         dbType = roadsDb.getType()
         dbSRID = roadsDb.getSRID()
-        try:
-            db = postgis_utils.GeoDB(host=dbHost,
-                                     port=dbPort,
-                                     dbname=dbName,
-                                     user=dbUser,
-                                     passwd=dbPass)
-        except postgis_utils.DbError, e:
-            raise GeoAlgorithmExecutionException(
-                self.tr("Couldn't connect to database:\n%s" % e.message))
+        # try:
+        #     db = postgis_utils.GeoDB(host=dbHost,
+        #                              port=dbPort,
+        #                              dbname=dbName,
+        #                              user=dbUser,
+        #                              passwd=dbPass)
+        # except postgis_utils.DbError, e:
+        #     raise GeoAlgorithmExecutionException(
+        #         self.tr("Couldn't connect to database:\n%s" % e.message))
 
 
         settings = QSettings()
@@ -206,9 +206,9 @@ class StandardizeRoadLayer(GeoAlgorithm):
             database = settings.value(mySettings + '/database')
         except Exception, e:
             raise GeoAlgorithmExecutionException(
-                self.tr('Wrong database connection name: %s' % connection))
+                self.tr('Error connecting to database: %s' % connection))
 
-        sql = 'select tdgStandardizeRoadLayer('
+        sql = 'select tdg.tdgStandardizeRoadLayer('
         sql = sql + "'" + roadsDb.getTable() + "',"
         sql = sql + "'" + schema + "',"
         sql = sql + "'" + tableName + "',"
@@ -253,7 +253,7 @@ class StandardizeRoadLayer(GeoAlgorithm):
         else:
             sql = sql + "'f')"
 
-        processing.runalg("qgis:postgisexecutesql",database,
+        processing.runalg("qgis:postgisexecutesql",dbName,
             sql)
         '''
         sql = 'select tdgGenerateCrossStreetData('
@@ -268,7 +268,7 @@ class StandardizeRoadLayer(GeoAlgorithm):
             except:
                 pass
             delSql = 'DROP TABLE ' + roadsDb.getTable()
-            processing.runalg("qgis:postgisexecutesql",database,
+            processing.runalg("qgis:postgisexecutesql",dbName,
                 delSql)
 
         # add layers to map
