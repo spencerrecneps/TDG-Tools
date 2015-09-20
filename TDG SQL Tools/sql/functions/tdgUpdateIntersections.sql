@@ -44,4 +44,4 @@ BEGIN
     RETURN 't';
 END;
 $BODY$ LANGUAGE plpgsql;
-ALTER FUNCTION tdg.tdgUpdateIntersections(REGCLASS,REGCLASS,INTEGER[]) OWNER TO gis;
+ALTER FUNCTION tdg.tdgUpdateIntersections(REGCLASS,REGCLASS) OWNER TO gis;

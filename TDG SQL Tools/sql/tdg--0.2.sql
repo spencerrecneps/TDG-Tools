@@ -396,158 +396,94 @@ BEGIN
 RETURN 't';
 END $func$ LANGUAGE plpgsql;
 ALTER FUNCTION tdgSetTurnInfo(REGCLASS,REGCLASS,REGCLASS,INT[]) OWNER TO gis;
-CREATE OR REPLACE FUNCTION tdgGenerateCrossStreetData(base_table REGCLASS)
+CREATE OR REPLACE FUNCTION tdg.tdgGenerateCrossStreetData(road_table_ REGCLASS)
 --populate cross-street data
 RETURNS BOOLEAN AS $func$
 
 DECLARE
-    schema_name TEXT;
-    table_name TEXT;
-    tablelink REGCLASS;
-    tablevert REGCLASS;
-    tableturnrestrict REGCLASS;
+    int_table REGCLASS;
 
 BEGIN
     raise notice 'PROCESSING:';
 
-    --get schema
-    BEGIN
-        RAISE NOTICE 'Checking % is network layer',base_table;
-        EXECUTE '   SELECT  schema_name, table_name
-                    FROM    tdgTableDetails($1::TEXT)'
-        USING   base_table
-        INTO    schema_name, table_name;
-        RAISE NOTICE 'Schema is %', schema_name;
+    int_table = road_table_ || '_intersections';
 
-        --get network tables
-        --  (returns error if table doesn't exist so this also
-        --  checks to make sure this is a true network layer)
-        tablelink := schema_name||'.'||table_name||'_net_link';
-        tablevert := schema_name||'.'||table_name||'_net_vert';
-        tableturnrestrict := schema_name||'.'||table_name||'_turn_restriction';
-    END;
+    RAISE NOTICE 'Clearing old values';
+    EXECUTE '
+        UPDATE ' || road_table_ || ' SET road_from = NULL, road_to = NULL;';
 
-    BEGIN
-        RAISE NOTICE 'Clearing old values';
-        EXECUTE '
-            UPDATE ' || base_table || '
-            SET     road_from = NULL,
-                    road_to = NULL;';
-    END;
+    --ignore culs-de-sac (legs = 1)
 
-    BEGIN
-        --ignore culs-de-sac (order 1)
-        --get road names of no intersection (order 2)
-        --from streets
-        RAISE NOTICE 'Assigning from streets, node order 2';
-        EXECUTE format('
-            UPDATE  %s
-            SET     road_from = r.road_name
-            FROM    %s v,
-                    %s r
-            WHERE   v.node_order = 2
-            AND     %s.source = v.id
-            AND     v.id IN (r.source,r.target)
-            AND     %s.id != r.id;
-            ',  base_table,
-                tablevert,
-                base_table,
-                base_table,
-                base_table);
-        --to streets
-        RAISE NOTICE 'Assigning to streets, node order 2';
-        EXECUTE format('
-            UPDATE  %s
-            SET     road_to = r.road_name
-            FROM    %s v,
-                    %s r
-            WHERE   v.node_order = 2
-            AND     %s.target = v.id
-            AND     v.id IN (r.source,r.target)
-            AND     %s.id != r.id;
-            ',  base_table,
-                tablevert,
-                base_table,
-                base_table,
-                base_table);
+    -- get road names of no intersection (order 2)
+    RAISE NOTICE 'Assigning for non-intersections (legs = 2)';
+    --from streets
+    EXECUTE '
+        UPDATE  '||road_table_||'
+        SET     road_from = r.road_name
+        FROM    '||int_table||' i,
+                '||road_table_||' r
+        WHERE   i.legs = 2
+        AND     '||road_table_||'.intersection_from = i.int_id
+        AND     i.int_id IN (r.intersection_from,r.intersection_to)
+        AND     '||road_table_||'.z_from = r.z_from
+        AND     '||road_table_||'.road_id != r.road_id;';
+    --to streets
+    EXECUTE '
+        UPDATE  '||road_table_||'
+        SET     road_from = r.road_name
+        FROM    '||int_table||' i,
+                '||road_table_||' r
+        WHERE   i.legs = 2
+        AND     '||road_table_||'.intersection_to = i.int_id
+        AND     i.int_id IN (r.intersection_from,r.intersection_to)
+        AND     '||road_table_||'.z_to = r.z_to
+        AND     '||road_table_||'.road_id != r.road_id;';
 
-        --get road name of leg nearest to 90 degrees
-        --from streets
-        RAISE NOTICE 'Assigning from streets, node order >2';
-        EXECUTE format('
-            WITH    x1 AS ( SELECT  a.id AS this_id,
-                                    b.id AS xing_id,
-                                    b.road_name AS xing_name,
-                                    ST_Intersection(ST_Buffer(v.geom,10),a.geom) AS this_geom,
-                                    ST_Intersection(ST_Buffer(v.geom,10),b.geom) AS xing_geom
-                            FROM    %s a,
-                                    %s v,
-                                    %s b
-                            WHERE   a.source = v.id
-                            AND     v.node_order > 2
-                            AND     v.id IN (b.source,b.target)
-                            AND     a.id != b.id),
-                    x2 AS ( SELECT  this_id,
-                                    xing_id,
-                                    xing_name,
-                                    degrees(ST_Azimuth(ST_StartPoint(this_geom),ST_EndPoint(this_geom)))::numeric AS this_azi,
-                                    degrees(ST_Azimuth(ST_StartPoint(xing_geom),ST_EndPoint(xing_geom)))::numeric AS xing_azi
-                            FROM    x1)
-            UPDATE  %s
-            SET     road_from =(SELECT      x2.xing_name
-                                FROM        x2
-                                WHERE       %s.id = x2.this_id
-                                ORDER BY    ABS(90 - (mod(mod(360 + x2.xing_azi - x2.this_azi, 360), 180) )) ASC
-                                LIMIT       1)
-            FROM    %s v
-            WHERE   source = v.id
-            AND     v.node_order > 2;
-            ',  base_table,
-                tablevert,
-                base_table,
-                base_table,
-                base_table,
-                tablevert);
-        --to streets
-        EXECUTE format('
-            WITH    x1 AS ( SELECT  a.id AS this_id,
-                                    b.id AS xing_id,
-                                    b.road_name AS xing_name,
-                                    ST_Intersection(ST_Buffer(v.geom,10),a.geom) AS this_geom,
-                                    ST_Intersection(ST_Buffer(v.geom,10),b.geom) AS xing_geom
-                            FROM    %s a,
-                                    %s v,
-                                    %s b
-                            WHERE   a.target = v.id
-                            AND     v.node_order > 2
-                            AND     v.id IN (b.source,b.target)
-                            AND     a.id != b.id),
-                    x2 AS ( SELECT  this_id,
-                                    xing_id,
-                                    xing_name,
-                                    degrees(ST_Azimuth(ST_StartPoint(this_geom),ST_EndPoint(this_geom)))::numeric AS this_azi,
-                                    degrees(ST_Azimuth(ST_StartPoint(xing_geom),ST_EndPoint(xing_geom)))::numeric AS xing_azi
-                            FROM    x1)
-            UPDATE  %s
-            SET     road_to =(  SELECT      x2.xing_name
-                                FROM        x2
-                                WHERE       %s.id = x2.this_id
-                                ORDER BY    ABS(90 - (mod(mod(360 + x2.xing_azi - x2.this_azi, 360), 180) )) ASC
-                                LIMIT       1)
-            FROM    %s v
-            WHERE   target = v.id
-            AND     v.node_order > 2;
-            ',  base_table,
-                tablevert,
-                base_table,
-                base_table,
-                base_table,
-                tablevert);
-    END;
+    --get road name of leg nearest to 90 degrees
+    RAISE NOTICE 'Assigning cross streets for intersections';
+    --from streets
+    EXECUTE '
+        WITH x AS (
+            SELECT  a.road_id AS this_id,
+                    b.road_id AS xing_id,
+                    b.road_name AS road_name,
+                    degrees(ST_Azimuth(ST_StartPoint(a.geom),ST_EndPoint(a.geom)))::numeric AS this_azi,
+                    degrees(ST_Azimuth(ST_StartPoint(b.geom),ST_EndPoint(b.geom)))::numeric AS xing_azi
+            FROM    '||road_table_||' a
+            JOIN    '||road_table_||' b
+                        ON a.intersection_from IN (b.intersection_from,b.intersection_to)
+                        AND a.road_id != b.road_id
+        )
+        UPDATE  '||road_table_||'
+        SET     road_from = (   SELECT      x.road_name
+                                FROM        x
+                                WHERE       '||road_table_||'.road_id = x.this_id
+                                ORDER BY    ABS(SIN(RADIANS(MOD(360 + x.xing_azi - x.this_azi,360)))) DESC
+                                LIMIT       1)';
+--ORDER BY    ABS(90 - (mod(mod(360 + x.xing_azi - x.this_azi, 360), 180) )) ASC
+    --to streets
+    EXECUTE '
+        WITH x AS (
+            SELECT  a.road_id AS this_id,
+                    b.road_id AS xing_id,
+                    b.road_name AS road_name,
+                    degrees(ST_Azimuth(ST_StartPoint(a.geom),ST_EndPoint(a.geom)))::numeric AS this_azi,
+                    degrees(ST_Azimuth(ST_StartPoint(b.geom),ST_EndPoint(b.geom)))::numeric AS xing_azi
+            FROM    '||road_table_||' a
+            JOIN    '||road_table_||' b
+                        ON a.intersection_to IN (b.intersection_from,b.intersection_to)
+                        AND a.road_id != b.road_id
+        )
+        UPDATE  '||road_table_||'
+        SET     road_to = (     SELECT      x.road_name
+                                FROM        x
+                                WHERE       '||road_table_||'.road_id = x.this_id
+                                ORDER BY    ABS(SIN(RADIANS(MOD(360 + x.xing_azi - x.this_azi,360)))) DESC
+                                LIMIT       1)';
 
     RETURN 't';
 END $func$ LANGUAGE plpgsql;
-ALTER FUNCTION tdgGenerateCrossStreetData(REGCLASS) OWNER TO gis;
+ALTER FUNCTION tdg.tdgGenerateCrossStreetData(REGCLASS) OWNER TO gis;
 CREATE OR REPLACE FUNCTION tdgTableCheck (input_table REGCLASS)
 RETURNS BOOLEAN AS $func$
 
@@ -1340,8 +1276,7 @@ END $func$ LANGUAGE plpgsql;
 ALTER FUNCTION tdgShortestPathIntersections(REGCLASS,REGCLASS,REGCLASS,INT,INT,INT) OWNER TO gis;
 CREATE OR REPLACE FUNCTION tdg.tdgUpdateIntersections(
     road_table_ REGCLASS,
-    int_table_ REGCLASS,
-    road_ids_ INTEGER[]
+    int_table_ REGCLASS
 )
 RETURNS BOOLEAN
 AS $BODY$
@@ -1351,71 +1286,33 @@ AS $BODY$
 -- a set of road_ids passed in as an array.
 --------------------------------------------------------------------------
 
-DECLARE
-    int_ids INTEGER[];
-
 BEGIN
     --suspend triggers on the intersections table so that our
     --changes are not ignored.
     EXECUTE 'ALTER TABLE ' || int_table_ || ' DISABLE TRIGGER ALL;';
 
-    --identify affected intersections
-    EXECUTE '
-        SELECT ARRAY(
-            SELECT  intersection_from
-            FROM  ' || road_table_ || '
-            WHERE road_id = ANY ($1);
-        )'
-    USING   road_ids_
-    INTO    int_ids;
-
     --update intersection leg count
     BEGIN
         RAISE NOTICE 'Updating intersections';
 
-        --road start points first
+        --update intersection leg counts
         EXECUTE '
-            UPDATE  ' || int_table_ || '
-            SET legs = (SELECT  COUNT(road_id)
-                        FROM  ' || road_table_ || ' r
-                        WHERE ' || int_table_ || '.int_id = ANY (int_ids)
-                        AND   ' || int_table_ || '.geom = ST_StartPoint(r.geom)
-                        AND   ' || int_table_ || '.z_elev = r.z_from;)'
-        USING   int_ids;
-        --road end points next
-        EXECUTE '
-            UPDATE  ' || int_table_ || '
-            SET legs = legs + ( SELECT  COUNT(road_id)
-                                FROM  ' || road_table_ || ' r
-                                WHERE ' || int_table_ || '.int_id = ANY (int_ids)
-                                AND   ' || int_table_ || '.geom = ST_EndPoint(r.geom)
-                                AND   ' || int_table_ || '.z_elev = r.z_to;)'
-        USING   int_ids;
+            UPDATE  '||int_table_||'
+            SET     legs = (SELECT  COUNT(roads.road_id)
+                            FROM    '||road_table_||' roads
+                            WHERE   '||int_table_||'.int_id
+                                        IN (roads.intersection_from,roads.intersection_to))
+            WHERE   int_id IN ( SELECT new_int_from FROM tmp_roadgeomchange
+                                UNION
+                                SELECT new_int_to FROM tmp_roadgeomchange
+                                UNION
+                                SELECT old_int_from FROM tmp_roadgeomchange
+                                UNION
+                                SELECT old_int_to FROM tmp_roadgeomchange);';
     END;
 
-    --update from/to intersections on roads
-    BEGIN
-        RAISE NOTICE 'Updating road intersection info';
-
-        --road start points first
-        EXECUTE '
-            UPDATE  ' || road_table_ || '
-            SET intersection_from = ints.int_id
-            FROM    ' || int_table_ || ' ints
-            WHERE   ' || road_table_ || '.road_id = ANY ($1)
-            AND     ST_StartPoint(' || road_table_ || '.geom) = ints.geom
-            AND     ' || road_table_ || '.z_from = ints.z_elev;'
-        USING   road_ids_;
-        --road end points next
-        EXECUTE '
-            UPDATE  ' || road_table_ || '
-            SET intersection_to = ints.int_id
-            FROM    ' || int_table_ || ' ints
-            WHERE   ' || road_table_ || '.road_id = ANY ($1)
-            AND     ST_EndPoint(' || road_table_ || '.geom) = ints.geom
-            AND     ' || road_table_ || '.z_to = ints.z_elev;'
-        USING   road_ids_;
-    END;
+    --delete intersections with no legs
+    EXECUTE 'DELETE FROM ' || int_table_ || ' WHERE legs < 1;';
 
     --re-enable triggers on the intersections table
     EXECUTE 'ALTER TABLE ' || int_table_ || ' ENABLE TRIGGER ALL;';
@@ -1423,7 +1320,7 @@ BEGIN
     RETURN 't';
 END;
 $BODY$ LANGUAGE plpgsql;
-ALTER FUNCTION tdg.tdgUpdateIntersections(REGCLASS,REGCLASS,INTEGER[]) OWNER TO gis;
+ALTER FUNCTION tdg.tdgUpdateIntersections(REGCLASS,REGCLASS) OWNER TO gis;
 CREATE OR REPLACE FUNCTION tdg.tdgStandardizeRoadLayer(
     input_table_ REGCLASS,
     output_schema_ TEXT,
@@ -1874,7 +1771,100 @@ BEGIN
 RETURN 't';
 END $func$ LANGUAGE plpgsql;
 ALTER FUNCTION tdgGenerateIntersectionStreets(REGCLASS, INT[]) OWNER TO gis;
-CREATE OR REPLACE FUNCTION tdgGetSRID(input_table REGCLASS,geom_name TEXT)
+CREATE OR REPLACE FUNCTION tdg.tdgUpdateIntersections(
+    road_table_ REGCLASS,
+    int_table_ REGCLASS,
+    road_ids_ INTEGER[]
+)
+RETURNS BOOLEAN
+AS $BODY$
+
+--------------------------------------------------------------------------
+-- This function update road and intersection information based on
+-- a set of road_ids passed in as an array.
+--------------------------------------------------------------------------
+
+DECLARE
+    int_ids INTEGER[];
+
+BEGIN
+    --suspend triggers on the intersections table so that our
+    --changes are not ignored.
+    EXECUTE 'ALTER TABLE ' || int_table_ || ' DISABLE TRIGGER ALL;';
+
+    --identify affected intersections
+    EXECUTE '
+        SELECT
+            ARRAY(
+                SELECT  intersection_from
+                FROM  ' || road_table_ || '
+                WHERE road_id = ANY ($1)
+            ) ||
+            ARRAY(
+                SELECT  intersection_to
+                FROM  ' || road_table_ || '
+                WHERE road_id = ANY ($1)
+            );'
+    INTO    int_ids
+    USING   road_ids_;
+    RAISE NOTICE 'Identified intersections: %', int_ids;
+
+    --update intersection leg count
+    BEGIN
+        RAISE NOTICE 'Updating intersections';
+
+        --road start points first
+        EXECUTE '
+            UPDATE  ' || int_table_ || '
+            SET legs = (SELECT  COUNT(road_id)
+                        FROM  ' || road_table_ || ' r
+                        WHERE ' || int_table_ || '.geom = ST_StartPoint(r.geom)
+                        AND   ' || int_table_ || '.z_elev = r.z_from)
+            WHERE ' || int_table_ || '.int_id = ANY ($1);'
+        USING   int_ids;
+        --road end points next
+        EXECUTE '
+            UPDATE  ' || int_table_ || '
+            SET legs = legs + ( SELECT  COUNT(road_id)
+                                FROM  ' || road_table_ || ' r
+                                WHERE ' || int_table_ || '.geom = ST_EndPoint(r.geom)
+                                AND   ' || int_table_ || '.z_elev = r.z_to)
+            WHERE ' || int_table_ || '.int_id = ANY ($1);'
+        USING   int_ids;
+    END;
+
+    --update from/to intersections on roads
+    BEGIN
+        RAISE NOTICE 'Updating road intersection info';
+
+        --road start points first
+        EXECUTE '
+            UPDATE  ' || road_table_ || '
+            SET intersection_from = ints.int_id
+            FROM    ' || int_table_ || ' ints
+            WHERE   ' || road_table_ || '.road_id = ANY ($1)
+            AND     ST_StartPoint(' || road_table_ || '.geom) = ints.geom
+            AND     ' || road_table_ || '.z_from = ints.z_elev;'
+        USING   road_ids_;
+        --road end points next
+        EXECUTE '
+            UPDATE  ' || road_table_ || '
+            SET intersection_to = ints.int_id
+            FROM    ' || int_table_ || ' ints
+            WHERE   ' || road_table_ || '.road_id = ANY ($1)
+            AND     ST_EndPoint(' || road_table_ || '.geom) = ints.geom
+            AND     ' || road_table_ || '.z_to = ints.z_elev;'
+        USING   road_ids_;
+    END;
+
+    --re-enable triggers on the intersections table
+    EXECUTE 'ALTER TABLE ' || int_table_ || ' ENABLE TRIGGER ALL;';
+
+    RETURN 't';
+END;
+$BODY$ LANGUAGE plpgsql;
+ALTER FUNCTION tdg.tdgUpdateIntersections(REGCLASS,REGCLASS,INTEGER[]) OWNER TO gis;
+CREATE OR REPLACE FUNCTION tdg.tdgGetSRID(input_table REGCLASS,geom_name TEXT)
 RETURNS INT AS $func$
 
 DECLARE
@@ -1892,132 +1882,63 @@ BEGIN
 
     RETURN geomdetails.srid;
 END $func$ LANGUAGE plpgsql;
-ALTER FUNCTION tdgGetSRID(REGCLASS,TEXT) OWNER TO gis;
-CREATE OR REPLACE FUNCTION tdgCalculateStress(  _input_table REGCLASS,
-                                                _seg BOOLEAN,
-                                                _approach BOOLEAN,
-                                                _cross BOOLEAN,
-                                                _ids INT[] DEFAULT NULL)
+ALTER FUNCTION tdg.tdgGetSRID(REGCLASS,TEXT) OWNER TO gis;
+CREATE OR REPLACE FUNCTION tdg.tdgCalculateStress(
+    input_table_ REGCLASS,
+    seg_ BOOLEAN,
+    approach_ BOOLEAN,
+    cross_ BOOLEAN,
+    ids_ INT[] DEFAULT NULL)
 --calculate stress score
 RETURNS BOOLEAN AS $func$
 
 DECLARE
-    tablecheck TEXT;
-    namecheck record;
+    stress_cross_w_median REGCLASS;
+    stress_cross_no_median REGCLASS;
+    stress_seg_mixed REGCLASS;
+    stress_seg_bike_w_park REGCLASS;
+    stress_seg_bike_no_park REGCLASS;
 
 BEGIN
     raise notice 'PROCESSING:';
 
-    --get schema
+    --test tables
     BEGIN
-        IF _cross THEN
-            --stress_cross_w_median
-            tablecheck := 'stress_cross_w_median';
-            RAISE NOTICE 'Checking % has stress tables',_input_table;
-            RAISE NOTICE 'Checking for %', tablecheck;
-            EXECUTE '   SELECT  schema_name,
-                                table_name
-                        FROM    tdgTableDetails('||quote_literal(tablecheck)||') AS (schema_name TEXT, table_name TEXT)' INTO namecheck;
-            IF namecheck.schema_name IS NULL OR namecheck.table_name IS NULL THEN
-                RAISE NOTICE '-------> % not found',tablecheck;
-                RETURN 'f';
-            ELSE
-                RAISE NOTICE '  -----> OK';
-            END IF;
-
-
-            --stress_cross_no_median
-            tablecheck := 'stress_cross_no_median';
-            RAISE NOTICE 'Checking for %', tablecheck;
-            EXECUTE '   SELECT  schema_name,
-                                table_name
-                        FROM    tdgTableDetails('||quote_literal(tablecheck)||') AS (schema_name TEXT, table_name TEXT)' INTO namecheck;
-            IF namecheck.schema_name IS NULL OR namecheck.table_name IS NULL THEN
-                RAISE NOTICE '-------> % not found',tablecheck;
-                RETURN 'f';
-            ELSE
-                RAISE NOTICE '  -----> OK';
-            END IF;
+        IF cross_ THEN
+            stress_cross_w_median := 'stress_cross_w_median'::REGCLASS;
+            stress_cross_no_median := 'stress_cross_no_median'::REGCLASS;
         END IF;
 
-        IF _seg THEN
-            --stress_seg_bike_w_park
-            tablecheck := 'stress_seg_bike_w_park';
-            RAISE NOTICE 'Checking for %', tablecheck;
-            EXECUTE '   SELECT  schema_name,
-                                table_name
-                        FROM    tdgTableDetails('||quote_literal(tablecheck)||') AS (schema_name TEXT, table_name TEXT)' INTO namecheck;
-            IF namecheck.schema_name IS NULL OR namecheck.table_name IS NULL THEN
-                RAISE NOTICE '-------> % not found',tablecheck;
-                RETURN 'f';
-            ELSE
-                RAISE NOTICE '  -----> OK';
-            END IF;
-
-            --stress_seg_bike_no_park
-            tablecheck := 'stress_seg_bike_no_park';
-            RAISE NOTICE 'Checking for %', tablecheck;
-            EXECUTE '   SELECT  schema_name,
-                                table_name
-                        FROM    tdgTableDetails('||quote_literal(tablecheck)||') AS (schema_name TEXT, table_name TEXT)' INTO namecheck;
-            IF namecheck.schema_name IS NULL OR namecheck.table_name IS NULL THEN
-                RAISE NOTICE '-------> % not found',tablecheck;
-                RETURN 'f';
-            ELSE
-                RAISE NOTICE '  -----> OK';
-            END IF;
-
-            --stress_seg_bike_w_park
-            tablecheck := 'stress_seg_bike_w_park';
-            RAISE NOTICE 'Checking for %', tablecheck;
-            EXECUTE '   SELECT  schema_name,
-                                table_name
-                        FROM    tdgTableDetails('||quote_literal(tablecheck)||') AS (schema_name TEXT, table_name TEXT)' INTO namecheck;
-            IF namecheck.schema_name IS NULL OR namecheck.table_name IS NULL THEN
-                RAISE NOTICE '-------> % not found',tablecheck;
-                RETURN 'f';
-            ELSE
-                RAISE NOTICE '  -----> OK';
-            END IF;
-
-            --stress_seg_mixed
-            tablecheck := 'stress_seg_mixed';
-            RAISE NOTICE 'Checking for %', tablecheck;
-            EXECUTE '   SELECT  schema_name,
-                                table_name
-                        FROM    tdgTableDetails('||quote_literal(tablecheck)||') AS (schema_name TEXT, table_name TEXT)' INTO namecheck;
-            IF namecheck.schema_name IS NULL OR namecheck.table_name IS NULL THEN
-                RAISE NOTICE '-------> % not found',tablecheck;
-                RETURN 'f';
-            ELSE
-                RAISE NOTICE '  -----> OK';
-            END IF;
+        IF seg_ THEN
+            stress_seg_mixed := 'stress_seg_mixed'::REGCLASS;
+            stress_seg_bike_w_park := 'stress_seg_bike_w_park'::REGCLASS;
+            stress_seg_bike_no_park := 'stress_seg_bike_no_park'::REGCLASS;
         END IF;
     END;
 
     --clear old values
     BEGIN
         RAISE NOTICE 'Clearing old values';
-        IF _seg THEN
+        IF seg_ THEN
             EXECUTE format('
                 UPDATE  %s
                 SET     ft_seg_stress = NULL,
                         tf_seg_stress = NULL;
-                ',  _input_table);
+                ',  input_table_);
         END IF;
-        IF _approach THEN
+        IF approach_ THEN
             EXECUTE format('
                 UPDATE  %s
                 SET     ft_int_stress = NULL,
                         tf_int_stress = NULL;
-                ',  _input_table);
+                ',  input_table_);
         END IF;
-        IF _cross THEN
+        IF cross_ THEN
             EXECUTE format('
                 UPDATE  %s
                 SET     ft_cross_stress = NULL,
                         tf_cross_stress = NULL;
-                ',  _input_table);
+                ',  input_table_);
         END IF;
     END;
 
@@ -2026,44 +1947,34 @@ BEGIN
         ------------------------------------------------------
         --apply segment stress using tables
         ------------------------------------------------------
-        IF _seg THEN
+        IF seg_ THEN
             RAISE NOTICE 'Calculating segment stress';
 
             -- mixed ft direction
-            EXECUTE format('
-                UPDATE  %s
+            EXECUTE '
+                UPDATE ' || input_table_ || '
                 SET     ft_seg_stress=( SELECT      stress
-                                        FROM        %s s
-                                        WHERE       %s.speed_limit <= s.speed
-                                        AND         %s.adt <= s.adt
-                                        AND         COALESCE(%s.ft_seg_lanes_thru,1) <= s.lanes
+                                        FROM        ' || stress_seg_mixed || ' s
+                                        WHERE       ' || input_table_ || '.speed_limit <= s.speed
+                                        AND         COALESCE(' || input_table_ || '.adt,0) <= s.adt
+                                        AND         COALESCE(' || input_table_ || '.ft_seg_lanes_thru,1) <= s.lanes
                                         ORDER BY    s.stress ASC
                                         LIMIT       1)
                 WHERE   (COALESCE(ft_seg_lanes_bike_wd_ft,0) < 4 AND COALESCE(ft_seg_lanes_park_wd_ft,0) = 0)
-                OR      COALESCE(ft_seg_lanes_bike_wd_ft,0) + COALESCE(ft_seg_lanes_park_wd_ft,0) < 12;
-                ',  _input_table,
-                    'tdg.stress_seg_mixed',
-                    _input_table,
-                    _input_table,
-                    _input_table);
+                OR      COALESCE(ft_seg_lanes_bike_wd_ft,0) + COALESCE(ft_seg_lanes_park_wd_ft,0) < 12;';
 
             -- mixed tf direction
-            EXECUTE format('
-                UPDATE  %s
+            EXECUTE '
+                UPDATE ' || input_table_ || '
                 SET     tf_seg_stress=( SELECT      stress
-                                        FROM        %s s
-                                        WHERE       %s.speed_limit <= s.speed
-                                        AND         %s.adt <= s.adt
-                                        AND         COALESCE(%s.tf_seg_lanes_thru,1) <= s.lanes
+                                        FROM        ' || stress_seg_mixed || ' s
+                                        WHERE       ' || input_table_ || '.speed_limit <= s.speed
+                                        AND         COALESCE(' || input_table_ || '.adt,0) <= s.adt
+                                        AND         COALESCE(' || input_table_ || '.tf_seg_lanes_thru,1) <= s.lanes
                                         ORDER BY    s.stress ASC
                                         LIMIT       1)
                 WHERE   (COALESCE(tf_seg_lanes_bike_wd_ft,0) < 4 AND COALESCE(tf_seg_lanes_park_wd_ft,0) = 0)
-                OR      COALESCE(tf_seg_lanes_bike_wd_ft,0) + COALESCE(tf_seg_lanes_park_wd_ft,0) < 12;
-                ',  _input_table,
-                    'tdg.stress_seg_mixed',
-                    _input_table,
-                    _input_table,
-                    _input_table);
+                OR      COALESCE(tf_seg_lanes_bike_wd_ft,0) + COALESCE(tf_seg_lanes_park_wd_ft,0) < 12;';
 
             -- bike lane no parking ft direction
             EXECUTE format('
@@ -2077,11 +1988,11 @@ BEGIN
                                         LIMIT       1)
                 WHERE   ft_seg_lanes_bike_wd_ft >= 4
                 AND     COALESCE(ft_seg_lanes_park_wd_ft,0) = 0;
-                ',  _input_table,
+                ',  input_table_,
                     'stress_seg_bike_no_park',
-                    _input_table,
-                    _input_table,
-                    _input_table);
+                    input_table_,
+                    input_table_,
+                    input_table_);
 
             -- bike lane no parking tf direction
             EXECUTE format('
@@ -2095,11 +2006,11 @@ BEGIN
                                         LIMIT       1)
                 WHERE   tf_seg_lanes_bike_wd_ft >= 4
                 AND     COALESCE(tf_seg_lanes_park_wd_ft,0) = 0;
-                ',  _input_table,
+                ',  input_table_,
                     'stress_seg_bike_no_park',
-                    _input_table,
-                    _input_table,
-                    _input_table);
+                    input_table_,
+                    input_table_,
+                    input_table_);
 
             -- parking with or without bike lanes ft direction
             EXECUTE format('
@@ -2113,12 +2024,12 @@ BEGIN
                                         LIMIT       1)
                 WHERE   COALESCE(ft_seg_lanes_park_wd_ft,0) > 0
                 AND     ft_seg_lanes_park_wd_ft + COALESCE(ft_seg_lanes_bike_wd_ft,0) >= 12;
-                ',  _input_table,
+                ',  input_table_,
                     'stress_seg_bike_w_park',
-                    _input_table,
-                    _input_table,
-                    _input_table,
-                    _input_table);
+                    input_table_,
+                    input_table_,
+                    input_table_,
+                    input_table_);
 
             -- parking with or without bike lanes tf direction
             EXECUTE format('
@@ -2132,12 +2043,12 @@ BEGIN
                                         LIMIT       1)
                 WHERE   COALESCE(tf_seg_lanes_park_wd_ft,0) > 0
                 AND     tf_seg_lanes_park_wd_ft + COALESCE(tf_seg_lanes_bike_wd_ft,0) >= 12;
-                ',  _input_table,
+                ',  input_table_,
                     'stress_seg_bike_w_park',
-                    _input_table,
-                    _input_table,
-                    _input_table,
-                    _input_table);
+                    input_table_,
+                    input_table_,
+                    input_table_,
+                    input_table_);
 
             --trails
             EXECUTE format('
@@ -2145,7 +2056,7 @@ BEGIN
                 SET     ft_seg_stress = 1,
                         tf_seg_stress = 1
                 WHERE   functional_class = %L;
-                ',  _input_table,
+                ',  input_table_,
                     'Trail');
 
             --overrides
@@ -2156,14 +2067,14 @@ BEGIN
                 UPDATE  %s
                 SET     tf_seg_stress = tf_seg_stress_override
                 WHERE   tf_seg_stress_override IS NOT NULL;
-                ',  _input_table,
-                    _input_table);
+                ',  input_table_,
+                    input_table_);
         END IF;
 
         ------------------------------------------------------
         --apply intersection stress
         ------------------------------------------------------
-        IF _approach THEN
+        IF approach_ THEN
             -- shared right turn lanes ft direction
             EXECUTE format('
                 UPDATE  %s
@@ -2175,8 +2086,8 @@ BEGIN
                 SET     ft_int_stress = 4
                 WHERE   COALESCE(ft_int_lanes_bike_wd_ft,0) < 4
                 AND     ft_int_lanes_rt_len_ft >= 150;
-                ',  _input_table,
-                    _input_table);
+                ',  input_table_,
+                    input_table_);
 
             -- shared right turn lanes tf direction
             EXECUTE format('
@@ -2189,8 +2100,8 @@ BEGIN
                 SET     tf_int_stress = 4
                 WHERE   COALESCE(tf_int_lanes_bike_wd_ft,0) < 4
                 AND     tf_int_lanes_rt_len_ft >= 150;
-                ',  _input_table,
-                    _input_table);
+                ',  input_table_,
+                    input_table_);
 
             -- pocket bike lane w/right turn lanes ft direction
             EXECUTE format('
@@ -2216,10 +2127,10 @@ BEGIN
                 SET     ft_int_stress = 4
                 WHERE   COALESCE(ft_int_lanes_bike_wd_ft,0) >= 4
                 AND     ft_int_stress IS NULL;
-                ',  _input_table,
-                    _input_table,
-                    _input_table,
-                    _input_table);
+                ',  input_table_,
+                    input_table_,
+                    input_table_,
+                    input_table_);
 
             -- pocket bike lane w/right turn lanes tf direction
             EXECUTE format('
@@ -2245,10 +2156,10 @@ BEGIN
                 SET     tf_int_stress = 4
                 WHERE   COALESCE(tf_int_lanes_bike_wd_ft,0) >= 4
                 AND     tf_int_stress IS NULL;
-                ',  _input_table,
-                    _input_table,
-                    _input_table,
-                    _input_table);
+                ',  input_table_,
+                    input_table_,
+                    input_table_,
+                    input_table_);
 
             --trails
             EXECUTE format('
@@ -2256,7 +2167,7 @@ BEGIN
                 SET     ft_int_stress = 1,
                         tf_int_stress = 1
                 WHERE   functional_class = %L;
-                ',  _input_table,
+                ',  input_table_,
                     'Trail');
 
             --overrides
@@ -2267,14 +2178,14 @@ BEGIN
                 UPDATE  %s
                 SET     tf_int_stress = tf_int_stress_override
                 WHERE   tf_int_stress_override IS NOT NULL;
-                ',  _input_table,
-                    _input_table);
+                ',  input_table_,
+                    input_table_);
         END IF;
 
         ------------------------------------------------------
         --apply crossing stress
         ------------------------------------------------------
-        IF _cross THEN
+        IF cross_ THEN
             --no median (or less than 6 ft), ft
             EXECUTE format('
                 UPDATE  %s
@@ -2285,10 +2196,10 @@ BEGIN
                                             ORDER BY    s.stress ASC
                                             LIMIT       1)
                 WHERE   COALESCE(ft_cross_median_wd_ft,0) < 6;
-                ',  _input_table,
+                ',  input_table_,
                     'stress_cross_no_median',
-                    _input_table,
-                    _input_table);
+                    input_table_,
+                    input_table_);
 
             --no median (or less than 6 ft), tf
             EXECUTE format('
@@ -2300,10 +2211,10 @@ BEGIN
                                             ORDER BY    s.stress ASC
                                             LIMIT       1)
                 WHERE   COALESCE(tf_cross_median_wd_ft,0) < 6;
-                ',  _input_table,
+                ',  input_table_,
                     'stress_cross_no_median',
-                    _input_table,
-                    _input_table);
+                    input_table_,
+                    input_table_);
 
             --with median at least 6 ft, ft
             EXECUTE format('
@@ -2315,10 +2226,10 @@ BEGIN
                                             ORDER BY    s.stress ASC
                                             LIMIT       1)
                 WHERE   COALESCE(ft_cross_median_wd_ft,0) >= 6;
-                ',  _input_table,
+                ',  input_table_,
                     'stress_cross_w_median',
-                    _input_table,
-                    _input_table);
+                    input_table_,
+                    input_table_);
 
             --with median at least 6 ft, tf
             EXECUTE format('
@@ -2330,24 +2241,24 @@ BEGIN
                                             ORDER BY    s.stress ASC
                                             LIMIT       1)
                 WHERE   COALESCE(tf_cross_median_wd_ft,0) >= 6;
-                ',  _input_table,
+                ',  input_table_,
                     'stress_cross_w_median',
-                    _input_table,
-                    _input_table);
+                    input_table_,
+                    input_table_);
 
             --traffic signals ft
             EXECUTE format('
                 UPDATE  %s
                 SET     ft_cross_stress = 1
                 WHERE   ft_cross_signal = 1;
-                ',  _input_table);
+                ',  input_table_);
 
             --traffic signals tf
             EXECUTE format('
                 UPDATE  %s
                 SET     tf_cross_stress = 1
                 WHERE   tf_cross_signal = 1;
-                ',  _input_table);
+                ',  input_table_);
 
             --overrides
             EXECUTE format('
@@ -2357,8 +2268,8 @@ BEGIN
                 UPDATE  %s
                 SET     ft_cross_stress = ft_cross_stress_override
                 WHERE   ft_cross_stress_override IS NOT NULL;
-                ',  _input_table,
-                    _input_table);
+                ',  input_table_,
+                    input_table_);
         END IF;
 
         ------------------------------------------------------
@@ -2375,25 +2286,43 @@ BEGIN
                     tf_int_stress = NULL,
                     tf_cross_stress = NULL
             WHERE   one_way = %L;
-            ',  _input_table,
+            ',  input_table_,
                 'tf',
-                _input_table,
+                input_table_,
                 'ft');
     END;
 
     RETURN 't';
 END $func$ LANGUAGE plpgsql;
-ALTER FUNCTION tdgCalculateStress(REGCLASS,BOOLEAN,BOOLEAN,BOOLEAN,INT[]) OWNER TO gis;
-CREATE OR REPLACE FUNCTION tdgTableDetails(input_table TEXT)
+ALTER FUNCTION tdg.tdgCalculateStress(REGCLASS,BOOLEAN,BOOLEAN,BOOLEAN,INT[]) OWNER TO gis;
+CREATE OR REPLACE FUNCTION tdg.tdgTableDetails(input_table TEXT)
 RETURNS TABLE (schema_name TEXT, table_name TEXT) AS $func$
 
 BEGIN
     RETURN QUERY EXECUTE '
         SELECT  nspname::TEXT, relname::TEXT
         FROM    pg_namespace n JOIN pg_class c ON n.oid = c.relnamespace
-        WHERE   c.oid = to_regclass(' || quote_literal(input_table) || ')';
+        WHERE   c.oid = ' || quote_literal(input_table) || '::REGCLASS';
+
+EXCEPTION
+    WHEN undefined_table THEN
+        RETURN;
 END $func$ LANGUAGE plpgsql;
-ALTER FUNCTION tdgTableDetails(TEXT) OWNER TO gis;
+ALTER FUNCTION tdg.tdgTableDetails(TEXT) OWNER TO gis;
+
+
+
+
+-- CREATE OR REPLACE FUNCTION tdgTableDetails(input_table TEXT)
+-- RETURNS TABLE (schema_name TEXT, table_name TEXT) AS $func$
+--
+-- BEGIN
+--     RETURN QUERY EXECUTE '
+--         SELECT  nspname::TEXT, relname::TEXT
+--         FROM    pg_namespace n JOIN pg_class c ON n.oid = c.relnamespace
+--         WHERE   c.oid = to_regclass(' || quote_literal(input_table) || ')';
+-- END $func$ LANGUAGE plpgsql;
+-- ALTER FUNCTION tdgTableDetails(TEXT) OWNER TO gis;
 CREATE OR REPLACE FUNCTION tdg.tdgRoadGeomChangeVals ()
 RETURNS TRIGGER
 AS $BODY$
@@ -2415,19 +2344,107 @@ AS $BODY$
 DECLARE
     road_table REGCLASS;
     int_table REGCLASS;
+    i INTEGER;
 
 BEGIN
     --get the intersection and road tables
     road_table := TG_TABLE_SCHEMA || '.' || TG_TABLE_NAME;
     int_table := TG_TABLE_SCHEMA || '.' || TG_TABLE_NAME || '_intersections';
 
-    IF (TG_OP = 'UPDATE' OR TG_OP = 'INSERT') THEN
+    --popoulate change tables
+    IF TG_OP = 'UPDATE' THEN
         NEW.geom := ST_SnapToGrid(NEW.geom,2);
-        INSERT INTO tmp_roadgeomchange (road_id) SELECT NEW.road_id;
-        RETURN NEW;
+
+        INSERT INTO tmp_roadgeomchange (
+            road_id,
+            old_int_from,
+            old_int_to)
+        VALUES (
+            OLD.road_id,
+            OLD.intersection_from,
+            OLD.intersection_to);
+    ELSEIF TG_OP = 'INSERT' THEN
+        NEW.geom := ST_SnapToGrid(NEW.geom,2);
+
+        INSERT INTO tmp_roadgeomchange (road_id)
+        VALUES (NEW.road_id);
     ELSEIF TG_OP = 'DELETE' THEN
-        INSERT INTO tmp_roadgeomchange (road_id) SELECT OLD.road_id;
+        INSERT INTO tmp_roadgeomchange (
+            road_id,
+            old_int_from,
+            old_int_to)
+        VALUES (
+            OLD.road_id,
+            OLD.intersection_from,
+            OLD.intersection_to);
         RETURN OLD;
+    END IF;
+
+    --suspend triggers on the intersections table so that our
+    --changes are not ignored.
+    EXECUTE 'ALTER TABLE ' || int_table || ' DISABLE TRIGGER ALL;';
+
+    --add new intersections
+    IF (TG_OP = 'UPDATE' OR TG_OP = 'INSERT') THEN
+        --startpoint
+        EXECUTE '
+            SELECT  1
+            FROM    '||int_table||' i
+            WHERE   i.geom = ST_StartPoint($1)
+            AND     i.z_elev = $2;'
+        USING   NEW.geom,
+                NEW.z_from;
+        GET DIAGNOSTICS i = ROW_COUNT;
+        IF i = 0 THEN
+            EXECUTE 'INSERT INTO '||int_table||' (geom) SELECT ST_StartPoint($1);'
+            USING   NEW.geom;
+        END IF;
+
+        --endpoint
+        EXECUTE '
+            SELECT  1
+            FROM    '||int_table||' i
+            WHERE   i.geom = ST_EndPoint($1)
+            AND     i.z_elev = $2;'
+        USING   NEW.geom,
+                NEW.z_to;
+        GET DIAGNOSTICS i = ROW_COUNT;
+        IF i = 0 THEN
+            EXECUTE 'INSERT INTO '||int_table||' (geom) SELECT ST_EndPoint($1);'
+            USING   NEW.geom;
+        END IF;
+
+        --re-enable triggers on the intersections table
+        EXECUTE 'ALTER TABLE ' || int_table || ' ENABLE TRIGGER ALL;';
+
+        --assign intersections to road
+        EXECUTE '
+            UPDATE  tmp_roadgeomchange
+            SET     new_int_from = (SELECT  int_id
+                                    FROM    '||int_table||' i
+                                    WHERE   ST_StartPoint($1) = i.geom
+                                    AND     $2 = i.z_elev),
+                    new_int_to = (  SELECT  int_id
+                                            FROM    '||int_table||' i
+                                            WHERE   ST_EndPoint($1) = i.geom
+                                            AND     $3 = i.z_elev)
+            WHERE   tmp_roadgeomchange.road_id = $4;'
+        USING   NEW.geom,
+                NEW.z_from,
+                NEW.z_to,
+                NEW.road_id;
+
+        --set new from intersection
+        EXECUTE 'SELECT new_int_from FROM tmp_roadgeomchange WHERE road_id = $1'
+        USING   NEW.road_id
+        INTO    NEW.intersection_from;
+
+        --set new to intersection
+        EXECUTE 'SELECT new_int_to FROM tmp_roadgeomchange WHERE road_id = $1'
+        USING   NEW.road_id
+        INTO    NEW.intersection_to;
+
+        RETURN NEW;
     END IF;
 END;
 $BODY$ LANGUAGE plpgsql;
@@ -2459,20 +2476,13 @@ AS $BODY$
 DECLARE
     road_table REGCLASS;
     int_table REGCLASS;
-    road_ids INTEGER[];
 
 BEGIN
     --get the intersection and road tables
     road_table := TG_TABLE_SCHEMA || '.' || TG_TABLE_NAME;
     int_table := TG_TABLE_SCHEMA || '.' || TG_TABLE_NAME || '_intersections';
 
-    EXECUTE 'SELECT ARRAY(SELECT road_id FROM tmp_roadgeomchange);'
-    INTO    road_ids;
-
-    EXECUTE 'tdgUpdateIntersections($1,$2,$3)'
-    USING   road_table,
-            int_table,
-            road_ids;
+    PERFORM tdgUpdateIntersections(road_table,int_table);
 
     DROP TABLE tmp_roadgeomchange;
 
@@ -2492,9 +2502,16 @@ AS $BODY$
 --------------------------------------------------------------------------
 
 BEGIN
-    CREATE TEMPORARY TABLE tmp_roadgeomchange (
-        road_id INT NOT NULL
-    ) ON COMMIT DROP;
+    EXECUTE '
+        CREATE TEMPORARY TABLE tmp_roadgeomchange (
+            road_id INTEGER,
+            old_int_from INTEGER,
+            new_int_from INTEGER,
+            old_int_to INTEGER,
+            new_int_to INTEGER
+        )
+        ON COMMIT DROP;';
+
     RETURN NULL;
 END;
 $BODY$ LANGUAGE plpgsql;

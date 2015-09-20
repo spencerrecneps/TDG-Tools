@@ -1,152 +1,88 @@
-CREATE OR REPLACE FUNCTION tdgGenerateCrossStreetData(base_table REGCLASS)
+CREATE OR REPLACE FUNCTION tdg.tdgGenerateCrossStreetData(road_table_ REGCLASS)
 --populate cross-street data
 RETURNS BOOLEAN AS $func$
 
 DECLARE
-    schema_name TEXT;
-    table_name TEXT;
-    tablelink REGCLASS;
-    tablevert REGCLASS;
-    tableturnrestrict REGCLASS;
+    int_table REGCLASS;
 
 BEGIN
     raise notice 'PROCESSING:';
 
-    --get schema
-    BEGIN
-        RAISE NOTICE 'Checking % is network layer',base_table;
-        EXECUTE '   SELECT  schema_name, table_name
-                    FROM    tdgTableDetails($1::TEXT)'
-        USING   base_table
-        INTO    schema_name, table_name;
-        RAISE NOTICE 'Schema is %', schema_name;
+    int_table = road_table_ || '_intersections';
 
-        --get network tables
-        --  (returns error if table doesn't exist so this also
-        --  checks to make sure this is a true network layer)
-        tablelink := schema_name||'.'||table_name||'_net_link';
-        tablevert := schema_name||'.'||table_name||'_net_vert';
-        tableturnrestrict := schema_name||'.'||table_name||'_turn_restriction';
-    END;
+    RAISE NOTICE 'Clearing old values';
+    EXECUTE '
+        UPDATE ' || road_table_ || ' SET road_from = NULL, road_to = NULL;';
 
-    BEGIN
-        RAISE NOTICE 'Clearing old values';
-        EXECUTE '
-            UPDATE ' || base_table || '
-            SET     road_from = NULL,
-                    road_to = NULL;';
-    END;
+    --ignore culs-de-sac (legs = 1)
 
-    BEGIN
-        --ignore culs-de-sac (order 1)
-        --get road names of no intersection (order 2)
-        --from streets
-        RAISE NOTICE 'Assigning from streets, node order 2';
-        EXECUTE format('
-            UPDATE  %s
-            SET     road_from = r.road_name
-            FROM    %s v,
-                    %s r
-            WHERE   v.node_order = 2
-            AND     %s.source = v.id
-            AND     v.id IN (r.source,r.target)
-            AND     %s.id != r.id;
-            ',  base_table,
-                tablevert,
-                base_table,
-                base_table,
-                base_table);
-        --to streets
-        RAISE NOTICE 'Assigning to streets, node order 2';
-        EXECUTE format('
-            UPDATE  %s
-            SET     road_to = r.road_name
-            FROM    %s v,
-                    %s r
-            WHERE   v.node_order = 2
-            AND     %s.target = v.id
-            AND     v.id IN (r.source,r.target)
-            AND     %s.id != r.id;
-            ',  base_table,
-                tablevert,
-                base_table,
-                base_table,
-                base_table);
+    -- get road names of no intersection (order 2)
+    RAISE NOTICE 'Assigning for non-intersections (legs = 2)';
+    --from streets
+    EXECUTE '
+        UPDATE  '||road_table_||'
+        SET     road_from = r.road_name
+        FROM    '||int_table||' i,
+                '||road_table_||' r
+        WHERE   i.legs = 2
+        AND     '||road_table_||'.intersection_from = i.int_id
+        AND     i.int_id IN (r.intersection_from,r.intersection_to)
+        AND     '||road_table_||'.z_from = r.z_from
+        AND     '||road_table_||'.road_id != r.road_id;';
+    --to streets
+    EXECUTE '
+        UPDATE  '||road_table_||'
+        SET     road_from = r.road_name
+        FROM    '||int_table||' i,
+                '||road_table_||' r
+        WHERE   i.legs = 2
+        AND     '||road_table_||'.intersection_to = i.int_id
+        AND     i.int_id IN (r.intersection_from,r.intersection_to)
+        AND     '||road_table_||'.z_to = r.z_to
+        AND     '||road_table_||'.road_id != r.road_id;';
 
-        --get road name of leg nearest to 90 degrees
-        --from streets
-        RAISE NOTICE 'Assigning from streets, node order >2';
-        EXECUTE format('
-            WITH    x1 AS ( SELECT  a.id AS this_id,
-                                    b.id AS xing_id,
-                                    b.road_name AS xing_name,
-                                    ST_Intersection(ST_Buffer(v.geom,10),a.geom) AS this_geom,
-                                    ST_Intersection(ST_Buffer(v.geom,10),b.geom) AS xing_geom
-                            FROM    %s a,
-                                    %s v,
-                                    %s b
-                            WHERE   a.source = v.id
-                            AND     v.node_order > 2
-                            AND     v.id IN (b.source,b.target)
-                            AND     a.id != b.id),
-                    x2 AS ( SELECT  this_id,
-                                    xing_id,
-                                    xing_name,
-                                    degrees(ST_Azimuth(ST_StartPoint(this_geom),ST_EndPoint(this_geom)))::numeric AS this_azi,
-                                    degrees(ST_Azimuth(ST_StartPoint(xing_geom),ST_EndPoint(xing_geom)))::numeric AS xing_azi
-                            FROM    x1)
-            UPDATE  %s
-            SET     road_from =(SELECT      x2.xing_name
-                                FROM        x2
-                                WHERE       %s.id = x2.this_id
-                                ORDER BY    ABS(90 - (mod(mod(360 + x2.xing_azi - x2.this_azi, 360), 180) )) ASC
-                                LIMIT       1)
-            FROM    %s v
-            WHERE   source = v.id
-            AND     v.node_order > 2;
-            ',  base_table,
-                tablevert,
-                base_table,
-                base_table,
-                base_table,
-                tablevert);
-        --to streets
-        EXECUTE format('
-            WITH    x1 AS ( SELECT  a.id AS this_id,
-                                    b.id AS xing_id,
-                                    b.road_name AS xing_name,
-                                    ST_Intersection(ST_Buffer(v.geom,10),a.geom) AS this_geom,
-                                    ST_Intersection(ST_Buffer(v.geom,10),b.geom) AS xing_geom
-                            FROM    %s a,
-                                    %s v,
-                                    %s b
-                            WHERE   a.target = v.id
-                            AND     v.node_order > 2
-                            AND     v.id IN (b.source,b.target)
-                            AND     a.id != b.id),
-                    x2 AS ( SELECT  this_id,
-                                    xing_id,
-                                    xing_name,
-                                    degrees(ST_Azimuth(ST_StartPoint(this_geom),ST_EndPoint(this_geom)))::numeric AS this_azi,
-                                    degrees(ST_Azimuth(ST_StartPoint(xing_geom),ST_EndPoint(xing_geom)))::numeric AS xing_azi
-                            FROM    x1)
-            UPDATE  %s
-            SET     road_to =(  SELECT      x2.xing_name
-                                FROM        x2
-                                WHERE       %s.id = x2.this_id
-                                ORDER BY    ABS(90 - (mod(mod(360 + x2.xing_azi - x2.this_azi, 360), 180) )) ASC
-                                LIMIT       1)
-            FROM    %s v
-            WHERE   target = v.id
-            AND     v.node_order > 2;
-            ',  base_table,
-                tablevert,
-                base_table,
-                base_table,
-                base_table,
-                tablevert);
-    END;
+    --get road name of leg nearest to 90 degrees
+    RAISE NOTICE 'Assigning cross streets for intersections';
+    --from streets
+    EXECUTE '
+        WITH x AS (
+            SELECT  a.road_id AS this_id,
+                    b.road_id AS xing_id,
+                    b.road_name AS road_name,
+                    degrees(ST_Azimuth(ST_StartPoint(a.geom),ST_EndPoint(a.geom)))::numeric AS this_azi,
+                    degrees(ST_Azimuth(ST_StartPoint(b.geom),ST_EndPoint(b.geom)))::numeric AS xing_azi
+            FROM    '||road_table_||' a
+            JOIN    '||road_table_||' b
+                        ON a.intersection_from IN (b.intersection_from,b.intersection_to)
+                        AND a.road_id != b.road_id
+        )
+        UPDATE  '||road_table_||'
+        SET     road_from = (   SELECT      x.road_name
+                                FROM        x
+                                WHERE       '||road_table_||'.road_id = x.this_id
+                                ORDER BY    ABS(SIN(RADIANS(MOD(360 + x.xing_azi - x.this_azi,360)))) DESC
+                                LIMIT       1)';
+--ORDER BY    ABS(90 - (mod(mod(360 + x.xing_azi - x.this_azi, 360), 180) )) ASC
+    --to streets
+    EXECUTE '
+        WITH x AS (
+            SELECT  a.road_id AS this_id,
+                    b.road_id AS xing_id,
+                    b.road_name AS road_name,
+                    degrees(ST_Azimuth(ST_StartPoint(a.geom),ST_EndPoint(a.geom)))::numeric AS this_azi,
+                    degrees(ST_Azimuth(ST_StartPoint(b.geom),ST_EndPoint(b.geom)))::numeric AS xing_azi
+            FROM    '||road_table_||' a
+            JOIN    '||road_table_||' b
+                        ON a.intersection_to IN (b.intersection_from,b.intersection_to)
+                        AND a.road_id != b.road_id
+        )
+        UPDATE  '||road_table_||'
+        SET     road_to = (     SELECT      x.road_name
+                                FROM        x
+                                WHERE       '||road_table_||'.road_id = x.this_id
+                                ORDER BY    ABS(SIN(RADIANS(MOD(360 + x.xing_azi - x.this_azi,360)))) DESC
+                                LIMIT       1)';
 
     RETURN 't';
 END $func$ LANGUAGE plpgsql;
-ALTER FUNCTION tdgGenerateCrossStreetData(REGCLASS) OWNER TO gis;
+ALTER FUNCTION tdg.tdgGenerateCrossStreetData(REGCLASS) OWNER TO gis;
