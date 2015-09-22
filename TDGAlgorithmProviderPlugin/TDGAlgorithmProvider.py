@@ -36,6 +36,7 @@ from ImportRoadLayer import ImportRoadLayer
 from StandardizeRoadLayer import StandardizeRoadLayer
 from MakeRoadNetwork import MakeRoadNetwork
 from CalculateStress import CalculateStress
+from Meld import Meld
 
 pluginPath = os.path.normpath(os.path.dirname(__file__))
 
@@ -52,7 +53,8 @@ class TDGAlgorithmProvider(AlgorithmProvider):
             ImportRoadLayer(),
             StandardizeRoadLayer(),
             MakeRoadNetwork(),
-            CalculateStress()]
+            CalculateStress(),
+            Meld()]
         for alg in self.alglist:
             alg.provider = self
 
