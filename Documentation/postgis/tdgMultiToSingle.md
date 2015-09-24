@@ -16,7 +16,7 @@ will be deleted when the function completes.
 
 **schema_** - The schema to create the new table in.
 
-**srid_** - The desired SRID for geometries in the new data.
+**srid_** - The desired SRID for geometries in the new data. N.B. The spatial unit of the SRID should be US Feet.
 
 **overwrite_** - Whether to overwrite an existing table of the same schema and name.
 
