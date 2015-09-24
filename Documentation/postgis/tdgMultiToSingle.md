@@ -1,6 +1,6 @@
 #tdgMultiToSingle
 
-Parameters:
+##Parameters
 * temp_table_ REGCLASS
 * new_table_ TEXT
 * schema_ TEXT
@@ -17,6 +17,8 @@ will be deleted when the function completes.
 **srid_** - The desired SRID for geometries in the new data.
 
 **overwrite_** - Whether to overwrite an existing table of the same schema and name.
+
+##Description
 
 When a table is imported from QGIS, the QGIS tool first uses QGIS' own "Import
 into PostGIS" tool to upload data into the database. However, the table that is
