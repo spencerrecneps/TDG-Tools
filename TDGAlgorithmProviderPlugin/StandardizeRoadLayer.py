@@ -246,7 +246,10 @@ class StandardizeRoadLayer(GeoAlgorithm):
 
         # create the standardized road layer
         progress.setInfo('Creating standardized road layer')
-        db._exec_sql_and_commit(sql)
+        try:
+            db._exec_sql_and_commit(sql)
+        except:
+            raise
         #processing.runalg("qgis:postgisexecutesql",dbName,sql)
         progress.setPercentage(30)
 
@@ -256,7 +259,10 @@ class StandardizeRoadLayer(GeoAlgorithm):
         if (fieldZTo is None or fieldZFrom is None):
             zval = 'f'
         sql = "select tdgMakeIntersections('%s','%s');" % (schema+'.'+tableName, zval)
-        db._exec_sql_and_commit(sql)
+        try:
+            db._exec_sql_and_commit(sql)
+        except:
+            raise
         #processing.runalg("qgis:postgisexecutesql",dbName,sql)
         progress.setPercentage(70)
 
@@ -274,8 +280,11 @@ class StandardizeRoadLayer(GeoAlgorithm):
             except:
                 pass
             delSql = 'DROP TABLE ' + roadsDb.getTable()
-            processing.runalg("qgis:postgisexecutesql",dbName,
-                delSql)
+            try:
+                db._exec_sql_and_commit(delSql)
+            except:
+                raise
+            #processing.runalg("qgis:postgisexecutesql",dbName,delSql)
 
         # add layers to map
         if addToMap:

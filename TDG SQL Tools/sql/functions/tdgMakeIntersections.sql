@@ -39,7 +39,7 @@ BEGIN
     END;
 
     BEGIN
-        RAISE NOTICE 'creating intersection table';
+        RAISE NOTICE 'Creating table %', int_table;
         EXECUTE format('
             CREATE TABLE %s (   int_id serial PRIMARY KEY,
                                 geom geometry(point,%L),
@@ -52,51 +52,56 @@ BEGIN
 
     --add intersections to table
     BEGIN
-        RAISE NOTICE 'adding intersections';
+        RAISE NOTICE 'Adding intersections';
 
         EXECUTE '
-            CREATE TEMP TABLE v (i INT, z INT, geom geometry(POINT,'||srid::TEXT||'))
+            CREATE TEMP TABLE tmp_v (i INT, z INT, geom geometry(POINT,'||srid::TEXT||'))
             ON COMMIT DROP;
-            INSERT INTO v (i, z, geom)
+            INSERT INTO tmp_v (i, z, geom)
                 SELECT      road_id, z_from, ST_StartPoint(geom)
                 FROM        ' || road_table_ || '
                 ORDER BY    road_id ASC;
-            INSERT INTO v (i, z, geom)
+            INSERT INTO tmp_v (i, z, geom)
                 SELECT      road_id, z_to, ST_EndPoint(geom)
                 FROM        ' || road_table_ || '
                 ORDER BY    road_id ASC;
             INSERT INTO ' || int_table || ' (legs, z_elev, geom)
                 SELECT      COUNT(i), COALESCE(z,0), geom
-                FROM        v
+                FROM        tmp_v
                 GROUP BY    COALESCE(z,0), geom;';
     END;
 
+    --intersection indices
+    BEGIN
+        EXECUTE '
+            CREATE INDEX sidx_'||table_name||'_ints_geom
+                ON '||int_table||' USING gist(geom);';
+        EXECUTE '
+            CREATE INDEX idx_'||table_name||'_ints_z_elev
+                ON '||int_table||' (z_elev);';
+    END;
     EXECUTE format('ANALYZE %s;', int_table);
 
     -- add intersection data to roads
     BEGIN
-        RAISE NOTICE 'populating intersection data in roads table';
-        EXECUTE format('
-            UPDATE  %s
+        RAISE NOTICE 'Populating intersection data in %', road_table_;
+        EXECUTE '
+            UPDATE  '||road_table_||'
             SET     intersection_from = if.int_id,
                     intersection_to = it.int_id
-            FROM    %s if,
-                    %s it
-            WHERE   ST_StartPoint(%s.geom) = if.geom
-            AND     %s.z_from = if.z_elev
-            AND     ST_EndPoint(%s.geom) = it.geom
-            AND     %s.z_to = it.z_elev;
-            ',  road_table_,
-                int_table,
-                int_table,
-                road_table_,
-                road_table_,
-                road_table_,
-                road_table_);
+            FROM    '||int_table||' if,
+                    '||int_table||' it
+            WHERE   '||road_table_||'.geom <#> if.geom < 5
+            AND     ST_StartPoint('||road_table_||'.geom) = if.geom
+            AND     '||road_table_||'.z_from = if.z_elev
+            AND     '||road_table_||'.geom <#> it.geom < 5
+            AND     ST_EndPoint('||road_table_||'.geom) = it.geom
+            AND     '||road_table_||'.z_to = it.z_elev;';
     END;
 
     --triggers to prevent changes
     BEGIN
+        RAISE NOTICE 'Creating triggers on %', int_table;
         EXECUTE format('
             CREATE TRIGGER tdg%sGeomPreventUpdate
                 BEFORE UPDATE OF geom ON %s
@@ -115,6 +120,7 @@ BEGIN
 
     --triggers to update intersections when changes are made to roads
     BEGIN
+        RAISE NOTICE 'Creating triggers on %', road_table_;
     -- refer to http://stackoverflow.com/questions/27837511/how-to-properly-emulate-statement-level-triggers-with-access-to-data-in-postgres
         --------------------
         --road geom changes
@@ -162,6 +168,7 @@ BEGIN
 
     --road intersection indexes
     BEGIN
+        RAISE NOTICE 'Adding indices to %', road_table_;
         EXECUTE '
             CREATE INDEX idx_'||table_name||'_intfrom ON '||road_table_||' (intersection_from);
             CREATE INDEX idx_'||table_name||'_intto ON '||road_table_||' (intersection_to);';
@@ -169,11 +176,13 @@ BEGIN
 
     --not null on road intersections
     BEGIN
+        RAISE NOTICE 'Setting column constraints on %', road_table_;
         EXECUTE '
             ALTER TABLE '||table_name||' ALTER COLUMN intersection_from SET NOT NULL;
             ALTER TABLE '||table_name||' ALTER COLUMN intersection_to SET NOT NULL;';
     END;
 
+    RAISE NOTICE 'Analyzing';
     EXECUTE 'ANALYZE '||road_table_||';';
     EXECUTE 'ANALYZE '||int_table||';';
 

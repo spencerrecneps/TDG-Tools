@@ -99,11 +99,15 @@ class MakeRoadNetwork(GeoAlgorithm):
             raise GeoAlgorithmExecutionException(
                 self.tr("Couldn't connect to database:\n%s" % e.message))
 
-        sql = 'select tdgMakeNetwork('
-        sql = sql + "'" + roadsDb.getTable() + "');"
-
-        processing.runalg("qgis:postgisexecutesql",dbName,
-            sql)
+        #sql = 'select tdgMakeNetwork('
+        #sql = sql + "'" + roadsDb.getTable() + "');"
+        sql = "select tdgMakeNetwork('%s.%s');" % (dbSchema, dbTable)
+        progress.setInfo('Creating network')
+        try:
+            db._exec_sql_and_commit(sql)
+        except:
+            raise
+        #processing.runalg("qgis:postgisexecutesql",dbName,sql)
 
 
         # add layers to map

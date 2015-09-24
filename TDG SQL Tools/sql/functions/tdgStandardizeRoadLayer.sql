@@ -35,8 +35,8 @@ BEGIN
 
     --drop table if overwrite
     IF overwrite_ THEN
-        EXECUTE 'DROP TABLE IF EXISTS ' || road_table || ';';
         EXECUTE 'DROP TABLE IF EXISTS ' || intersection_table || ';';
+        EXECUTE 'DROP TABLE IF EXISTS ' || road_table || ';';
     ELSE
         RAISE NOTICE 'Checking whether table % exists',road_table;
         EXECUTE '   SELECT  table_name

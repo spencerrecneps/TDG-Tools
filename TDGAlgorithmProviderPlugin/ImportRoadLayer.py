@@ -164,7 +164,7 @@ class ImportRoadLayer(GeoAlgorithm):
         #linestrings = processing.runalg('qgis:multiparttosingleparts')
 
         # first create the schema if it doesn't exist
-        progress.setInfo('Creating schema ' + schema + '(if necessary)')
+        progress.setInfo('Creating schema ' + schema + ' (if necessary)')
         processing.runalg("qgis:postgisexecutesql",connection,
             "CREATE SCHEMA IF NOT EXISTS " + schema)
         progress.setPercentage(5)

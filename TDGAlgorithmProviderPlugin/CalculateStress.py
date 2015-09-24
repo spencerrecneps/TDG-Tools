@@ -123,5 +123,9 @@ class CalculateStress(GeoAlgorithm):
             sql = sql + ",'f'"
         sql = sql + ");"
 
-        processing.runalg("qgis:postgisexecutesql",dbName,
-            sql)
+        #processing.runalg("qgis:postgisexecutesql",dbName,sql)
+        progress.setInfo('Calculating stress scores')
+        try:
+            db._exec_sql_and_commit(sql)
+        except:
+            raise
