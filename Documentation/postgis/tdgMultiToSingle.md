@@ -1,11 +1,13 @@
 #tdgMultiToSingle
 
-Parameters:
-* temp_table_ REGCLASS
-* new_table_ TEXT
-* schema_ TEXT
-* srid_ INTEGER
-* overwrite_ BOOLEAN
+##Parameters
+Name        | Type
+------------|----------
+temp_table_ | REGCLASS
+new_table_  | TEXT
+schema_     | TEXT
+srid_       | INTEGER
+overwrite_  | BOOLEAN
 
 **temp_table_** - The name of the temporary table to copy data from. This table
 will be deleted when the function completes.
@@ -17,6 +19,8 @@ will be deleted when the function completes.
 **srid_** - The desired SRID for geometries in the new data.
 
 **overwrite_** - Whether to overwrite an existing table of the same schema and name.
+
+##Description
 
 When a table is imported from QGIS, the QGIS tool first uses QGIS' own "Import
 into PostGIS" tool to upload data into the database. However, the table that is
