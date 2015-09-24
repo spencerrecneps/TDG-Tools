@@ -1,11 +1,13 @@
 #tdgMultiToSingle
 
 ##Parameters
-* temp_table_ REGCLASS
-* new_table_ TEXT
-* schema_ TEXT
-* srid_ INTEGER
-* overwrite_ BOOLEAN
+Name|Type
+---------
+temp_table_|REGCLASS
+new_table_|TEXT
+schema_|TEXT
+srid_|INTEGER
+overwrite_|BOOLEAN
 
 **temp_table_** - The name of the temporary table to copy data from. This table
 will be deleted when the function completes.
