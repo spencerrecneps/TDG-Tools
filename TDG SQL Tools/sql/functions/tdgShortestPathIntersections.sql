@@ -1,9 +1,10 @@
-CREATE OR REPLACE FUNCTION tdgShortestPathIntersections (   inttable_ REGCLASS,
-                                                            linktable_ REGCLASS,
-                                                            verttable_ REGCLASS,
-                                                            from_ INT,
-                                                            to_ INT,
-                                                            stress_ INT DEFAULT NULL)
+CREATE OR REPLACE FUNCTION tdg.tdgShortestPathIntersections (   
+    inttable_ REGCLASS,
+    linktable_ REGCLASS,
+    verttable_ REGCLASS,
+    from_ INT,
+    to_ INT,
+    stress_ INT DEFAULT NULL)
 RETURNS SETOF tdgShortestPathType AS $func$
 
 DECLARE
@@ -86,4 +87,4 @@ USING   linktable_,
         stress_;
 --followed by empty RETURN???
 END $func$ LANGUAGE plpgsql;
-ALTER FUNCTION tdgShortestPathIntersections(REGCLASS,REGCLASS,REGCLASS,INT,INT,INT) OWNER TO gis;
+ALTER FUNCTION tdg.tdgShortestPathIntersections(REGCLASS,REGCLASS,REGCLASS,INT,INT,INT) OWNER TO gis;
