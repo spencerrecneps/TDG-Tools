@@ -1,12 +1,12 @@
 #tdgMultiToSingle
 
 ##Parameters
-Name | Type
----|---
+Name        | Type
+------------|----------
 temp_table_ | REGCLASS
-new_table_ | TEXT
-schema_ | TEXT
-srid_ | INTEGER
+new_table_  | TEXT
+schema_     | TEXT
+srid_       | INTEGER
 overwrite_  | BOOLEAN
 
 **temp_table_** - The name of the temporary table to copy data from. This table
