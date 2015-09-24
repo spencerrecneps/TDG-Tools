@@ -2,7 +2,7 @@
 
 ##Parameters
 Name        | Type
-----------------------
+------------|---------
 temp_table_ | REGCLASS
 new_table_  | TEXT
 schema_     | TEXT
