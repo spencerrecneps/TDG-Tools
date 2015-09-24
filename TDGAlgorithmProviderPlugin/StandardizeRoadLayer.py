@@ -244,9 +244,24 @@ class StandardizeRoadLayer(GeoAlgorithm):
         else:
             sql = sql + "'f')"
 
-        processing.runalg("qgis:postgisexecutesql",dbName,
-            sql)
+        # create the standardized road layer
+        progress.setInfo('Creating standardized road layer')
+        db._exec_sql_and_commit(sql)
+        #processing.runalg("qgis:postgisexecutesql",dbName,sql)
+        progress.setPercentage(30)
+
+        # create the intersections
+        progress.setInfo('Generating intersection points')
+        zval = 't'
+        if (fieldZTo is None or fieldZFrom is None):
+            zval = 'f'
+        sql = "select tdgMakeIntersections('%s','%s');" % (schema+'.'+tableName, zval)
+        db._exec_sql_and_commit(sql)
+        #processing.runalg("qgis:postgisexecutesql",dbName,sql)
+        progress.setPercentage(70)
+
         '''
+        progress.setInfo('Updating cross street info')
         sql = 'select tdgGenerateCrossStreetData('
         sql = sql + "'" + tableName + "');"
         processing.runalg("qgis:postgisexecutesql",dbName,

@@ -164,28 +164,36 @@ class ImportRoadLayer(GeoAlgorithm):
         #linestrings = processing.runalg('qgis:multiparttosingleparts')
 
         # first create the schema if it doesn't exist
+        progress.setInfo('Creating schema ' + schema + '(if necessary)')
         processing.runalg("qgis:postgisexecutesql",connection,
             "CREATE SCHEMA IF NOT EXISTS " + schema)
+        progress.setPercentage(5)
 
         # set up the temporary table and import the raw data
         tempTableName = ''.join(random.sample(string.lowercase,10))
+        progress.setInfo('Importing to temporary table: ' + tempTableName)
         #processing.runalg("qgis:importintopostgis",database,tempTableName,schema,
         #    roadsLayer,False,True,'geom',True,True,None)
         processing.runalg("qgis:importintopostgis",roadsLayer,
             self.getParameterValue(self.DATABASE),schema,tempTableName,
             None,'geom',False,True,True,True)
+        progress.setPercentage(60)
 
         # move the temp table to its final location
         # need to parse the crsId to get rid of the EPSG: part
+        progress.setInfo('Cleaning and finalizing table as: ' + table)
         processing.runalg("qgis:postgisexecutesql",connection,
             "SELECT tdgMultiToSingle(\'" + tempTableName + "\',\
                 \'" + table + "\',\
                 \'" + schema + "\',\
                 " + str(pgSrid) + ",\
                 " + str(overwrite) + ")")
+        progress.setPercentage(90)
 
+        progress.setInfo('Analyzing table ' + table)
         processing.runalg("qgis:postgisexecutesql",connection,
             "ANALYZE " + schema + "." + table)
+        progress.setPercentage(99)
 
         # set up the new table's uri
         uri = QgsDataSourceURI()
