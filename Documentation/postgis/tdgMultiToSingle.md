@@ -9,9 +9,13 @@ Parameters:
 
 **temp_table_** - The name of the temporary table to copy data from. This table
 will be deleted when the function completes.
+
 **new_table_** - The name of the new table to create.
+
 **schema_** - The schema to create the new table in.
+
 **srid_** - The desired SRID for geometries in the new data.
+
 **overwrite_** - Whether to overwrite an existing table of the same schema and name.
 
 When a table is imported from QGIS, the QGIS tool first uses QGIS' own "Import
