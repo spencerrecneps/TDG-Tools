@@ -7,6 +7,7 @@ RETURNS BOOLEAN AS $func$
 
 DECLARE
     temp_table TEXT;
+    link_record RECORD;
 
 BEGIN
     --compile list of int_ids_ if needed
@@ -14,7 +15,14 @@ BEGIN
         EXECUTE 'SELECT array_agg(int_id) FROM '||int_table||';' INTO int_ids_;
     END IF;
 
-    RAISE NOTICE 'creating temporary turn data table';
+    FOR link_record IN
+    EXECUTE 'SELECT link_id, ST_Azimuth(geom) AS azi'
+    LOOP
+    --loop through links with int legs > 3. find r/l turns using sin/cos
+
+
+
+    RAISE NOTICE 'Creating temporary movement data table';
     temp_table := 'tmp_tdggtitemptbl';
     EXECUTE '
         CREATE TEMP TABLE '||temp_table||' (
@@ -26,70 +34,58 @@ BEGIN
             movement TEXT)
         ON COMMIT DROP;';
 
-    EXECUTE format('
-        INSERT INTO %s (int_id,
-                        ref_link_id,
-                        match_link_id,
-                        ref_azimuth,
-                        match_azimuth)
-        SELECT  int.int_id,
+    EXECUTE '
+        INSERT INTO '||temp_table||' (
+            int_id,
+            ref_link_id,
+            match_link_id,
+            ref_azimuth,
+            match_azimuth)
+        SELECT  ints.int_id,
                 l1.link_id,
                 l2.link_id,
-                degrees(ST_Azimuth(ST_StartPoint(l1.geom),ST_EndPoint(l1.geom))),
-                degrees(ST_Azimuth(ST_StartPoint(l2.geom),ST_EndPoint(l2.geom)))
-        FROM    %s int
-        JOIN    %s v1
-                ON  int.int_id = v1.int_id
-        JOIN    %s v2
-                ON  int.int_id = v2.int_id
-        JOIN    %s l1
+                ST_Azimuth(ST_StartPoint(l1.geom),ST_EndPoint(l1.geom)),
+                ST_Azimuth(ST_StartPoint(l2.geom),ST_EndPoint(l2.geom))
+        FROM    '||int_table_||' ints
+        JOIN    '||vert_table_||' v1
+                ON  ints.int_id = v1.int_id
+        JOIN    '||vert_table_||' v2
+                ON  ints.int_id = v2.int_id
+        JOIN    '||link_table_||' l1
                 ON  l1.target_vert = v1.vert_id
                 AND l1.road_id IS NOT NULL
-        JOIN    %s l2
+        JOIN    '||link_table_||' l2
                 ON  l2.source_vert = v2.vert_id
                 AND l2.road_id IS NOT NULL
                 AND l1.road_id != l2.road_id
-        WHERE   int.int_id = ANY (%L);
-        ',  temp_table,
-            int_table_,
-            vert_table_,
-            vert_table_,
-            link_table_,
-            link_table_,
-            int_ids_);
+        WHERE   ints.int_id = ANY ($1);'
+    USING   int_ids_;
 
     --reposition the azimuths so that the reference azimuth is at 0
-    RAISE NOTICE 'repositioning azimuths';
+    RAISE NOTICE 'Repositioning azimuths';
 
     EXECUTE format('
-        UPDATE  %s
-        SET     match_azimuth = MOD((360 + 180 + match_azimuth - ref_azimuth),360);
-        ',  temp_table);
-
-    EXECUTE format('
-        UPDATE  %s
-        SET     ref_azimuth = 0;
-        ',  temp_table);
-
+        UPDATE  '||temp_table||'
+        SET     match_azimuth = match_azimuth - ref_azimuth,
+                ref_azimuth = 0;';
 
     --calculate turn info
     --right turns
+
+
+
     RAISE NOTICE 'calculating turns';
-    EXECUTE format('
-        UPDATE  %s
-        SET     movement = %L
+    EXECUTE '
+        UPDATE  '||temp_table||'
+        SET     movement = $1
         FROM    (   SELECT DISTINCT ON (t.ref_link_id)
                         t.ref_link_id,
                         t.match_link_id
-                    FROM %s t
+                    FROM '||temp_table||' t
                     ORDER BY t.ref_link_id, t.match_azimuth DESC) x
-        WHERE   %s.ref_link_id = x.ref_link_id
-        AND     %s.match_link_id = x.match_link_id;
-        ',  temp_table,
-            'right',
-            temp_table,
-            temp_table,
-            temp_table);
+        WHERE   '||temp_table||'.ref_link_id = x.ref_link_id
+        AND     '||temp_table||'.match_link_id = x.match_link_id;'
+    USING   'right';
 
     --left turns
     EXECUTE format('
