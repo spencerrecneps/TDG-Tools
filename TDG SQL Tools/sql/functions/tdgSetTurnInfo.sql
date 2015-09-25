@@ -15,10 +15,25 @@ BEGIN
         EXECUTE 'SELECT array_agg(int_id) FROM '||int_table||';' INTO int_ids_;
     END IF;
 
-    FOR link_record IN
-    EXECUTE 'SELECT link_id, ST_Azimuth(geom) AS azi'
-    LOOP
     --loop through links with int legs > 3. find r/l turns using sin/cos
+    FOR link_record IN
+    EXECUTE '
+        SELECT  links.link_id,
+                ST_Azimuth(links.geom) AS azi,
+                ints.legs,
+                ints.int_id
+        FROM    '||link_table_||' links
+        JOIN    '||vert_table_||' verts
+                ON links.target_vert = verts.vert_id
+        JOIN    '||int_table_||' ints
+                ON verts.int_id = ints.int_id
+                AND ints.legs > 2
+        WHERE   links.road_id IS NOT NULL
+        AND     ints.int_id = ANY ($1)'
+    USING   int_ids_
+    LOOP
+        
+    END LOOP;
 
 
 
