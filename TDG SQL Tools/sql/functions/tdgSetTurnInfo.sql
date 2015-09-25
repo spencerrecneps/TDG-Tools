@@ -8,18 +8,23 @@ RETURNS BOOLEAN AS $func$
 DECLARE
     temp_table TEXT;
     link_record RECORD;
+    source_vert INT;
 
 BEGIN
     --compile list of int_ids_ if needed
     IF int_ids_ IS NULL THEN
-        EXECUTE 'SELECT array_agg(int_id) FROM '||int_table||';' INTO int_ids_;
+        EXECUTE 'SELECT array_agg(int_id) FROM '||int_table_||';' INTO int_ids_;
     END IF;
+
+    --set existing movements to null
+    EXECUTE 'UPDATE '||link_table_||' SET movement = NULL;';
 
     --loop through links with int legs > 3. find r/l turns using sin/cos
     FOR link_record IN
     EXECUTE '
-        SELECT  links.link_id,
-                ST_Azimuth(links.geom) AS azi,
+        SELECT  links.road_id,
+                ST_Azimuth(ST_StartPoint(links.geom),ST_EndPoint(links.geom)) AS azi,
+                links.target_vert,
                 ints.legs,
                 ints.int_id
         FROM    '||link_table_||' links
@@ -32,146 +37,68 @@ BEGIN
         AND     ints.int_id = ANY ($1)'
     USING   int_ids_
     LOOP
-        
+        --right turn
+        EXECUTE '
+            SELECT      links.source_vert
+            FROM        '||link_table_||' links
+            JOIN        '||vert_table_||' verts
+                        ON links.source_vert = verts.vert_id
+            WHERE       links.road_id IS NOT NULL
+            AND         links.road_id != $1
+            AND         verts.int_id = $2
+            AND         sin(ST_Azimuth(ST_StartPoint(links.geom),ST_EndPoint(links.geom)) - $3) > 0 --must be between 0 and 180 degrees
+            AND         cos(ST_Azimuth(ST_StartPoint(links.geom),ST_EndPoint(links.geom)) - $3) < 0.7 --must be greater than 45 degrees
+            ORDER BY    cos(ST_Azimuth(ST_StartPoint(links.geom),ST_EndPoint(links.geom)) - $3) ASC --closest to 180 degrees
+            LIMIT       1;'
+        USING   link_record.road_id,
+                link_record.int_id,
+                link_record.azi
+        INTO    source_vert;
+
+        IF NOT source_vert IS NULL THEN
+            EXECUTE '
+                UPDATE  '||link_table_||'
+                SET     movement = $1
+                WHERE   source_vert = $2
+                AND     target_vert = $3;'
+            USING   'right',
+                    link_record.target_vert,
+                    source_vert;
+        END IF;
+
+        --left turn
+        EXECUTE '
+            SELECT      links.source_vert
+            FROM        '||link_table_||' links
+            JOIN        '||vert_table_||' verts
+                        ON links.source_vert = verts.vert_id
+            WHERE       links.road_id IS NOT NULL
+            AND         links.road_id != $1
+            AND         verts.int_id = $2
+            AND         sin(ST_Azimuth(ST_StartPoint(links.geom),ST_EndPoint(links.geom)) - $3) < 0 --must be between 180 and 360 degrees
+            AND         cos(ST_Azimuth(ST_StartPoint(links.geom),ST_EndPoint(links.geom)) - $3) < 0.7 --must be less than 315 degrees
+            ORDER BY    cos(ST_Azimuth(ST_StartPoint(links.geom),ST_EndPoint(links.geom)) - $3) ASC --closest to 180 degrees
+            LIMIT       1;'
+        USING   link_record.road_id,
+                link_record.int_id,
+                link_record.azi
+        INTO    source_vert;
+
+        IF NOT source_vert IS NULL THEN
+            EXECUTE '
+                UPDATE  '||link_table_||'
+                SET     movement = $1
+                WHERE   source_vert = $2
+                AND     target_vert = $3;'
+            USING   'left',
+                    link_record.target_vert,
+                    source_vert;
+        END IF;
     END LOOP;
 
+    EXECUTE 'UPDATE '||link_table_||' SET movement = $1 WHERE movement IS NULL;'
+    USING   'straight';
 
-
-    RAISE NOTICE 'Creating temporary movement data table';
-    temp_table := 'tmp_tdggtitemptbl';
-    EXECUTE '
-        CREATE TEMP TABLE '||temp_table||' (
-            int_id INT,
-            ref_link_id INT,
-            match_link_id INT,
-            ref_azimuth INT,
-            match_azimuth INT,
-            movement TEXT)
-        ON COMMIT DROP;';
-
-    EXECUTE '
-        INSERT INTO '||temp_table||' (
-            int_id,
-            ref_link_id,
-            match_link_id,
-            ref_azimuth,
-            match_azimuth)
-        SELECT  ints.int_id,
-                l1.link_id,
-                l2.link_id,
-                ST_Azimuth(ST_StartPoint(l1.geom),ST_EndPoint(l1.geom)),
-                ST_Azimuth(ST_StartPoint(l2.geom),ST_EndPoint(l2.geom))
-        FROM    '||int_table_||' ints
-        JOIN    '||vert_table_||' v1
-                ON  ints.int_id = v1.int_id
-        JOIN    '||vert_table_||' v2
-                ON  ints.int_id = v2.int_id
-        JOIN    '||link_table_||' l1
-                ON  l1.target_vert = v1.vert_id
-                AND l1.road_id IS NOT NULL
-        JOIN    '||link_table_||' l2
-                ON  l2.source_vert = v2.vert_id
-                AND l2.road_id IS NOT NULL
-                AND l1.road_id != l2.road_id
-        WHERE   ints.int_id = ANY ($1);'
-    USING   int_ids_;
-
-    --reposition the azimuths so that the reference azimuth is at 0
-    RAISE NOTICE 'Repositioning azimuths';
-
-    EXECUTE format('
-        UPDATE  '||temp_table||'
-        SET     match_azimuth = match_azimuth - ref_azimuth,
-                ref_azimuth = 0;';
-
-    --calculate turn info
-    --right turns
-
-
-
-    RAISE NOTICE 'calculating turns';
-    EXECUTE '
-        UPDATE  '||temp_table||'
-        SET     movement = $1
-        FROM    (   SELECT DISTINCT ON (t.ref_link_id)
-                        t.ref_link_id,
-                        t.match_link_id
-                    FROM '||temp_table||' t
-                    ORDER BY t.ref_link_id, t.match_azimuth DESC) x
-        WHERE   '||temp_table||'.ref_link_id = x.ref_link_id
-        AND     '||temp_table||'.match_link_id = x.match_link_id;'
-    USING   'right';
-
-    --left turns
-    EXECUTE format('
-        UPDATE  %s
-        SET     movement = %L
-        FROM    (   SELECT DISTINCT ON (t.ref_link_id)
-                        t.ref_link_id,
-                        t.match_link_id
-                    FROM %s t
-                    ORDER BY t.ref_link_id, t.match_azimuth ASC) x
-        WHERE   %s.ref_link_id = x.ref_link_id
-        AND     %s.match_link_id = x.match_link_id;
-        ',  temp_table,
-            'left',
-            temp_table,
-            temp_table,
-            temp_table);
-
-    --straights
-    EXECUTE format('
-        UPDATE  %s
-        SET     movement = %L
-        WHERE   movement IS NULL;
-        ',  temp_table,
-            'straight');
-
-    --find intersections where left or right may have been assigned
-    --but it's actually straight (i.e.T intersections or other odd situations)
-    EXECUTE format('
-        UPDATE  %s
-        SET     movement = %L
-        FROM    %s ints
-        WHERE   %s.int_id = ints.int_id
-        AND     (   SELECT  COUNT(t.int_id)
-                    FROM    %s t
-                    WHERE   t.int_id = %s.int_id
-                    AND     t.ref_link_id = %s.ref_link_id) < 3
-        AND     match_azimuth >= 150
-        AND     match_azimuth <= 210
-        AND     movement != %L;
-        ',  temp_table,
-            'straight',
-            int_table_,
-            temp_table,
-            temp_table,
-            temp_table,
-            temp_table,
-            'straight');
-
-    --set turn info in links table
-    RAISE NOTICE 'setting turns in %', link_table_;
-    EXECUTE format('
-        UPDATE  %s
-        SET     movement = t.movement
-        FROM    %s t,
-                %s lf,
-                %s lt
-        WHERE   t.ref_link_id = lf.link_id
-        AND     t.match_link_id = lt.link_id
-        AND     %s.source_vert = lf.target_vert
-        AND     %s.target_vert = lt.source_vert;
-        ',  link_table_,
-            temp_table,
-            link_table_,
-            link_table_,
-            link_table_,
-            link_table_);
-
-    --clean up temp table
-    EXECUTE format('DROP TABLE %s', temp_table);
-
-RETURN 't';
+    RETURN 't';
 END $func$ LANGUAGE plpgsql;
 ALTER FUNCTION tdg.tdgSetTurnInfo(REGCLASS,REGCLASS,REGCLASS,INT[]) OWNER TO gis;
