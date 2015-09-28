@@ -18,6 +18,10 @@ DROP FUNCTION make_plpythonu();
 
 --give permission to the tdg schema
 GRANT ALL ON SCHEMA tdg TO PUBLIC;
+
+CREATE SCHEMA IF NOT EXISTS generated AUTHORIZATION gis;
+CREATE SCHEMA IF NOT EXISTS received AUTHORIZATION gis;
+CREATE SCHEMA IF NOT EXISTS scratch AUTHORIZATION gis;
 CREATE TYPE tdgShortestPathType AS (
     move_sequence INT,
     link_id INT,
