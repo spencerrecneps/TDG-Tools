@@ -100,71 +100,14 @@ BEGIN
     END;
 
     --triggers to prevent changes
-    BEGIN
-        RAISE NOTICE 'Creating triggers on %', int_table;
-        EXECUTE format('
-            CREATE TRIGGER tdg%sGeomPreventUpdate
-                BEFORE UPDATE OF geom ON %s
-                FOR EACH ROW
-                EXECUTE PROCEDURE tdgTriggerDoNothing();
-            ',  table_name || '_ints',
-                int_table);
-        EXECUTE format('
-            CREATE TRIGGER tdg%sPreventInsDel
-                BEFORE INSERT OR DELETE ON %s
-                FOR EACH ROW
-                EXECUTE PROCEDURE tdgTriggerDoNothing();
-            ',  table_name || '_ints',
-                int_table);
-    END;
+    EXECUTE 'SELECT tdgMakeIntersectionTriggers($1,$2);'
+    USING   int_table,
+            table_name;
 
     --triggers to update intersections when changes are made to roads
-    BEGIN
-        RAISE NOTICE 'Creating triggers on %', road_table_;
-    -- refer to http://stackoverflow.com/questions/27837511/how-to-properly-emulate-statement-level-triggers-with-access-to-data-in-postgres
-        --------------------
-        --road geom changes
-        --------------------
-        -- create temp table
-        EXECUTE '
-            CREATE TRIGGER tr_tdg'||table_name||'GeomUpdateTable
-                BEFORE UPDATE OF geom, z_from, z_to ON '||road_table_||'
-                FOR EACH STATEMENT
-                EXECUTE PROCEDURE tdgRoadGeomChangeTable();';
-        -- populate with vals
-        EXECUTE '
-            CREATE TRIGGER tr_tdg'||table_name||'GeomUpdateVals
-                BEFORE UPDATE OF geom, z_from, z_to ON '||road_table_||'
-                FOR EACH ROW
-                EXECUTE PROCEDURE tdgRoadGeomChangeVals();';
-        -- update intersections
-        EXECUTE '
-            CREATE TRIGGER tr_tdg'||table_name||'GeomUpdateIntersections
-                AFTER UPDATE OF geom, z_from, z_to ON '||road_table_||'
-                FOR EACH STATEMENT
-                EXECUTE PROCEDURE tdgRoadGeomUpdate();';
-        --------------------
-        --road insert/delete
-        --------------------
-        -- create temp table
-        EXECUTE '
-            CREATE TRIGGER tr_tdg'||table_name||'GeomAddDelTable
-                BEFORE INSERT OR DELETE ON '||road_table_||'
-                FOR EACH STATEMENT
-                EXECUTE PROCEDURE tdgRoadGeomChangeTable();';
-        -- populate with vals
-        EXECUTE '
-            CREATE TRIGGER tr_tdg'||table_name||'GeomAddDelVals
-                BEFORE INSERT OR DELETE ON '||road_table_||'
-                FOR EACH ROW
-                EXECUTE PROCEDURE tdgRoadGeomChangeVals();';
-        -- update intersections
-        EXECUTE '
-            CREATE TRIGGER tr_tdg'||table_name||'GeomAddDelIntersections
-                AFTER INSERT OR DELETE ON '||road_table_||'
-                FOR EACH STATEMENT
-                EXECUTE PROCEDURE tdgRoadGeomUpdate();';
-    END;
+    EXECUTE 'SELECT tdgMakeRoadTriggers($1,$2);'
+    USING   road_table_,
+            table_name;
 
     --road intersection indexes
     BEGIN

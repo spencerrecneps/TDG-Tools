@@ -244,161 +244,99 @@ RETURNS BOOLEAN AS $func$
 
 DECLARE
     temp_table TEXT;
+    link_record RECORD;
+    source_vert INT;
 
 BEGIN
     --compile list of int_ids_ if needed
     IF int_ids_ IS NULL THEN
-        EXECUTE 'SELECT array_agg(int_id) FROM '||int_table||';' INTO int_ids_;
+        EXECUTE 'SELECT array_agg(int_id) FROM '||int_table_||';' INTO int_ids_;
     END IF;
 
-    RAISE NOTICE 'creating temporary turn data table';
-    temp_table := 'tmp_tdggtitemptbl';
+    --set existing movements to null
+    EXECUTE 'UPDATE '||link_table_||' SET movement = NULL;';
+
+    --loop through links with int legs > 3. find r/l turns using sin/cos
+    FOR link_record IN
     EXECUTE '
-        CREATE TEMP TABLE '||temp_table||' (
-            int_id INT,
-            ref_link_id INT,
-            match_link_id INT,
-            ref_azimuth INT,
-            match_azimuth INT,
-            movement TEXT)
-        ON COMMIT DROP;';
+        SELECT  links.road_id,
+                ST_Azimuth(ST_StartPoint(links.geom),ST_EndPoint(links.geom)) AS azi,
+                links.target_vert,
+                ints.legs,
+                ints.int_id
+        FROM    '||link_table_||' links
+        JOIN    '||vert_table_||' verts
+                ON links.target_vert = verts.vert_id
+        JOIN    '||int_table_||' ints
+                ON verts.int_id = ints.int_id
+                AND ints.legs > 2
+        WHERE   links.road_id IS NOT NULL
+        AND     ints.int_id = ANY ($1)'
+    USING   int_ids_
+    LOOP
+        --right turn
+        EXECUTE '
+            SELECT      links.source_vert
+            FROM        '||link_table_||' links
+            JOIN        '||vert_table_||' verts
+                        ON links.source_vert = verts.vert_id
+            WHERE       links.road_id IS NOT NULL
+            AND         links.road_id != $1
+            AND         verts.int_id = $2
+            AND         sin(ST_Azimuth(ST_StartPoint(links.geom),ST_EndPoint(links.geom)) - $3) > 0 --must be between 0 and 180 degrees
+            AND         cos(ST_Azimuth(ST_StartPoint(links.geom),ST_EndPoint(links.geom)) - $3) < 0.7 --must be greater than 45 degrees
+            ORDER BY    cos(ST_Azimuth(ST_StartPoint(links.geom),ST_EndPoint(links.geom)) - $3) ASC --closest to 180 degrees
+            LIMIT       1;'
+        USING   link_record.road_id,
+                link_record.int_id,
+                link_record.azi
+        INTO    source_vert;
 
-    EXECUTE format('
-        INSERT INTO %s (int_id,
-                        ref_link_id,
-                        match_link_id,
-                        ref_azimuth,
-                        match_azimuth)
-        SELECT  int.int_id,
-                l1.link_id,
-                l2.link_id,
-                degrees(ST_Azimuth(ST_StartPoint(l1.geom),ST_EndPoint(l1.geom))),
-                degrees(ST_Azimuth(ST_StartPoint(l2.geom),ST_EndPoint(l2.geom)))
-        FROM    %s int
-        JOIN    %s v1
-                ON  int.int_id = v1.int_id
-        JOIN    %s v2
-                ON  int.int_id = v2.int_id
-        JOIN    %s l1
-                ON  l1.target_vert = v1.vert_id
-                AND l1.road_id IS NOT NULL
-        JOIN    %s l2
-                ON  l2.source_vert = v2.vert_id
-                AND l2.road_id IS NOT NULL
-                AND l1.road_id != l2.road_id
-        WHERE   int.int_id = ANY (%L);
-        ',  temp_table,
-            int_table_,
-            vert_table_,
-            vert_table_,
-            link_table_,
-            link_table_,
-            int_ids_);
+        IF NOT source_vert IS NULL THEN
+            EXECUTE '
+                UPDATE  '||link_table_||'
+                SET     movement = $1
+                WHERE   source_vert = $2
+                AND     target_vert = $3;'
+            USING   'right',
+                    link_record.target_vert,
+                    source_vert;
+        END IF;
 
-    --reposition the azimuths so that the reference azimuth is at 0
-    RAISE NOTICE 'repositioning azimuths';
+        --left turn
+        EXECUTE '
+            SELECT      links.source_vert
+            FROM        '||link_table_||' links
+            JOIN        '||vert_table_||' verts
+                        ON links.source_vert = verts.vert_id
+            WHERE       links.road_id IS NOT NULL
+            AND         links.road_id != $1
+            AND         verts.int_id = $2
+            AND         sin(ST_Azimuth(ST_StartPoint(links.geom),ST_EndPoint(links.geom)) - $3) < 0 --must be between 180 and 360 degrees
+            AND         cos(ST_Azimuth(ST_StartPoint(links.geom),ST_EndPoint(links.geom)) - $3) < 0.7 --must be less than 315 degrees
+            ORDER BY    cos(ST_Azimuth(ST_StartPoint(links.geom),ST_EndPoint(links.geom)) - $3) ASC --closest to 180 degrees
+            LIMIT       1;'
+        USING   link_record.road_id,
+                link_record.int_id,
+                link_record.azi
+        INTO    source_vert;
 
-    EXECUTE format('
-        UPDATE  %s
-        SET     match_azimuth = MOD((360 + 180 + match_azimuth - ref_azimuth),360);
-        ',  temp_table);
+        IF NOT source_vert IS NULL THEN
+            EXECUTE '
+                UPDATE  '||link_table_||'
+                SET     movement = $1
+                WHERE   source_vert = $2
+                AND     target_vert = $3;'
+            USING   'left',
+                    link_record.target_vert,
+                    source_vert;
+        END IF;
+    END LOOP;
 
-    EXECUTE format('
-        UPDATE  %s
-        SET     ref_azimuth = 0;
-        ',  temp_table);
+    EXECUTE 'UPDATE '||link_table_||' SET movement = $1 WHERE movement IS NULL;'
+    USING   'straight';
 
-
-    --calculate turn info
-    --right turns
-    RAISE NOTICE 'calculating turns';
-    EXECUTE format('
-        UPDATE  %s
-        SET     movement = %L
-        FROM    (   SELECT DISTINCT ON (t.ref_link_id)
-                        t.ref_link_id,
-                        t.match_link_id
-                    FROM %s t
-                    ORDER BY t.ref_link_id, t.match_azimuth DESC) x
-        WHERE   %s.ref_link_id = x.ref_link_id
-        AND     %s.match_link_id = x.match_link_id;
-        ',  temp_table,
-            'right',
-            temp_table,
-            temp_table,
-            temp_table);
-
-    --left turns
-    EXECUTE format('
-        UPDATE  %s
-        SET     movement = %L
-        FROM    (   SELECT DISTINCT ON (t.ref_link_id)
-                        t.ref_link_id,
-                        t.match_link_id
-                    FROM %s t
-                    ORDER BY t.ref_link_id, t.match_azimuth ASC) x
-        WHERE   %s.ref_link_id = x.ref_link_id
-        AND     %s.match_link_id = x.match_link_id;
-        ',  temp_table,
-            'left',
-            temp_table,
-            temp_table,
-            temp_table);
-
-    --straights
-    EXECUTE format('
-        UPDATE  %s
-        SET     movement = %L
-        WHERE   movement IS NULL;
-        ',  temp_table,
-            'straight');
-
-    --find intersections where left or right may have been assigned
-    --but it's actually straight (i.e.T intersections or other odd situations)
-    EXECUTE format('
-        UPDATE  %s
-        SET     movement = %L
-        FROM    %s ints
-        WHERE   %s.int_id = ints.int_id
-        AND     (   SELECT  COUNT(t.int_id)
-                    FROM    %s t
-                    WHERE   t.int_id = %s.int_id
-                    AND     t.ref_link_id = %s.ref_link_id) < 3
-        AND     match_azimuth >= 150
-        AND     match_azimuth <= 210
-        AND     movement != %L;
-        ',  temp_table,
-            'straight',
-            int_table_,
-            temp_table,
-            temp_table,
-            temp_table,
-            temp_table,
-            'straight');
-
-    --set turn info in links table
-    RAISE NOTICE 'setting turns in %', link_table_;
-    EXECUTE format('
-        UPDATE  %s
-        SET     movement = t.movement
-        FROM    %s t,
-                %s lf,
-                %s lt
-        WHERE   t.ref_link_id = lf.link_id
-        AND     t.match_link_id = lt.link_id
-        AND     %s.source_vert = lf.target_vert
-        AND     %s.target_vert = lt.source_vert;
-        ',  link_table_,
-            temp_table,
-            link_table_,
-            link_table_,
-            link_table_,
-            link_table_);
-
-    --clean up temp table
-    EXECUTE format('DROP TABLE %s', temp_table);
-
-RETURN 't';
+    RETURN 't';
 END $func$ LANGUAGE plpgsql;
 ALTER FUNCTION tdg.tdgSetTurnInfo(REGCLASS,REGCLASS,REGCLASS,INT[]) OWNER TO gis;
 CREATE OR REPLACE FUNCTION tdg.tdgGenerateCrossStreetData(road_table_ REGCLASS)
@@ -1146,8 +1084,8 @@ BEGIN
 
     --drop table if overwrite
     IF overwrite_ THEN
-        EXECUTE 'DROP TABLE IF EXISTS ' || road_table || ';';
         EXECUTE 'DROP TABLE IF EXISTS ' || intersection_table || ';';
+        EXECUTE 'DROP TABLE IF EXISTS ' || road_table || ';';
     ELSE
         RAISE NOTICE 'Checking whether table % exists',road_table;
         EXECUTE '   SELECT  table_name
@@ -1333,96 +1271,17 @@ BEGIN
         EXECUTE format('ANALYZE %s;',road_table);
     END;
 
-    BEGIN
-        IF z_from_field_ IS NOT NULL AND z_to_field_ IS NOT NULL THEN
-            PERFORM tdgMakeIntersections(road_table::REGCLASS,'t'::BOOLEAN);
-        ELSE
-            PERFORM tdgMakeIntersections(road_table::REGCLASS,'f'::BOOLEAN);
-        END IF;
-
-    END;
-
-    --intersection indexes
-    BEGIN
-        EXECUTE format('
-            CREATE INDEX idx_%s_intfrom ON %s (intersection_from);
-            CREATE INDEX idx_%s_intto ON %s (intersection_to);
-            ',  output_table_name_,
-                road_table,
-                output_table_name_,
-                road_table);
-    END;
+    -- BEGIN
+    --     IF z_from_field_ IS NOT NULL AND z_to_field_ IS NOT NULL THEN
+    --         PERFORM tdgMakeIntersections(road_table::REGCLASS,'t'::BOOLEAN);
+    --     ELSE
+    --         PERFORM tdgMakeIntersections(road_table::REGCLASS,'f'::BOOLEAN);
+    --     END IF;
+    --
+    -- END;
 
     BEGIN
         EXECUTE format('ANALYZE %s;',road_table);
-    END;
-
-    --not null on intersections
-    BEGIN
-        EXECUTE format('
-            ALTER TABLE %s ALTER COLUMN intersection_from SET NOT NULL;
-            ALTER TABLE %s ALTER COLUMN intersection_to SET NOT NULL;
-            ',  road_table,
-                road_table);
-    END;
-
-    --triggers
-    BEGIN
-    -- refer to http://stackoverflow.com/questions/27837511/how-to-properly-emulate-statement-level-triggers-with-access-to-data-in-postgres
-        --------------------
-        --road geom changes
-        --------------------
-        -- create temp table
-        EXECUTE format('
-            CREATE TRIGGER tr_tdg%sGeomUpdateTable
-                BEFORE UPDATE OF geom, z_from, z_to ON %s
-                FOR EACH STATEMENT
-                EXECUTE PROCEDURE tdgRoadGeomChangeTable();
-            ',  output_table_name_,
-                output_table_name_);
-        -- populate with vals
-        EXECUTE format('
-            CREATE TRIGGER tr_tdg%sGeomUpdateVals
-                BEFORE UPDATE OF geom, z_from, z_to ON %s
-                FOR EACH ROW
-                EXECUTE PROCEDURE tdgRoadGeomChangeVals();
-            ',  output_table_name_,
-                output_table_name_);
-        -- update intersections
-        EXECUTE format('
-            CREATE TRIGGER tr_tdg%sGeomUpdateIntersections
-                AFTER UPDATE OF geom, z_from, z_to ON %s
-                FOR EACH STATEMENT
-                EXECUTE PROCEDURE tdgRoadGeomUpdate();
-            ',  output_table_name_,
-                output_table_name_);
-        --------------------
-        --road insert/delete
-        --------------------
-        -- create temp table
-        EXECUTE format('
-            CREATE TRIGGER tr_tdg%sGeomAddDelTable
-                BEFORE INSERT OR DELETE ON %s
-                FOR EACH STATEMENT
-                EXECUTE PROCEDURE tdgRoadGeomChangeTable();
-            ',  output_table_name_,
-                output_table_name_);
-        -- populate with vals
-        EXECUTE format('
-            CREATE TRIGGER tr_tdg%sGeomAddDelVals
-                BEFORE INSERT OR DELETE ON %s
-                FOR EACH ROW
-                EXECUTE PROCEDURE tdgRoadGeomChangeVals();
-            ',  output_table_name_,
-                output_table_name_);
-        -- update intersections
-        EXECUTE format('
-            CREATE TRIGGER tr_tdg%sGeomAddDelIntersections
-                AFTER INSERT OR DELETE ON %s
-                FOR EACH STATEMENT
-                EXECUTE PROCEDURE tdgRoadGeomUpdate();
-            ',  output_table_name_,
-                output_table_name_);
     END;
 
     RETURN 't';
@@ -1431,7 +1290,7 @@ ALTER FUNCTION tdg.tdgStandardizeRoadLayer(
     REGCLASS,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,
     TEXT,TEXT,TEXT,BOOLEAN,BOOLEAN) OWNER TO gis;
 CREATE OR REPLACE FUNCTION tdg.tdgMakeIntersections (
-    input_table_ REGCLASS,
+    road_table_ REGCLASS,
     z_vals_ BOOLEAN DEFAULT 'f')
 RETURNS BOOLEAN AS $func$
 
@@ -1439,8 +1298,7 @@ DECLARE
     namecheck RECORD;
     schema_name TEXT;
     table_name TEXT;
-    inttable text;
-    sridinfo record;
+    int_table TEXT;
     srid INT;
 
 BEGIN
@@ -1448,20 +1306,20 @@ BEGIN
 
     --check table and schema
     BEGIN
-        RAISE NOTICE 'Getting table details for %',input_table_;
+        RAISE NOTICE 'Getting table details for %',road_table_;
         EXECUTE '   SELECT  schema_name, table_name
                     FROM    tdgTableDetails($1::TEXT)'
-        USING   input_table_
+        USING   road_table_
         INTO    schema_name, table_name;
 
-        inttable = schema_name || '.' || table_name || '_intersections';
+        int_table = schema_name || '.' || table_name || '_intersections';
     END;
 
     --get srid of the geom
     BEGIN
         RAISE NOTICE 'Getting SRID of geometry';
         EXECUTE 'SELECT tdgGetSRID($1,$2);'
-        USING   input_table_,
+        USING   road_table_,
                 'geom'
         INTO    srid;
 
@@ -1472,79 +1330,95 @@ BEGIN
     END;
 
     BEGIN
-        RAISE NOTICE 'creating intersection table';
+        RAISE NOTICE 'Creating table %', int_table;
         EXECUTE format('
             CREATE TABLE %s (   int_id serial PRIMARY KEY,
                                 geom geometry(point,%L),
                                 z_elev INT NOT NULL DEFAULT 0,
                                 legs INT,
                                 signalized BOOLEAN);
-            ',  inttable,
+            ',  int_table,
                 srid);
     END;
 
     --add intersections to table
     BEGIN
-        RAISE NOTICE 'adding intersections';
+        RAISE NOTICE 'Adding intersections';
 
         EXECUTE '
-            CREATE TEMP TABLE v (i INT, z INT, geom geometry(POINT,'||srid::TEXT||'))
+            CREATE TEMP TABLE tmp_v (i INT, z INT, geom geometry(POINT,'||srid::TEXT||'))
             ON COMMIT DROP;
-            INSERT INTO v (i, z, geom)
+            INSERT INTO tmp_v (i, z, geom)
                 SELECT      road_id, z_from, ST_StartPoint(geom)
-                FROM        ' || input_table_ || '
+                FROM        ' || road_table_ || '
                 ORDER BY    road_id ASC;
-            INSERT INTO v (i, z, geom)
+            INSERT INTO tmp_v (i, z, geom)
                 SELECT      road_id, z_to, ST_EndPoint(geom)
-                FROM        ' || input_table_ || '
+                FROM        ' || road_table_ || '
                 ORDER BY    road_id ASC;
-            INSERT INTO ' || inttable || ' (legs, z_elev, geom)
+            INSERT INTO ' || int_table || ' (legs, z_elev, geom)
                 SELECT      COUNT(i), COALESCE(z,0), geom
-                FROM        v
+                FROM        tmp_v
                 GROUP BY    COALESCE(z,0), geom;';
     END;
 
-    EXECUTE format('ANALYZE %s;', inttable);
+    --intersection indices
+    BEGIN
+        EXECUTE '
+            CREATE INDEX sidx_'||table_name||'_ints_geom
+                ON '||int_table||' USING gist(geom);';
+        EXECUTE '
+            CREATE INDEX idx_'||table_name||'_ints_z_elev
+                ON '||int_table||' (z_elev);';
+    END;
+    EXECUTE format('ANALYZE %s;', int_table);
 
     -- add intersection data to roads
     BEGIN
-        RAISE NOTICE 'populating intersection data in roads table';
-        EXECUTE format('
-            UPDATE  %s
+        RAISE NOTICE 'Populating intersection data in %', road_table_;
+        EXECUTE '
+            UPDATE  '||road_table_||'
             SET     intersection_from = if.int_id,
                     intersection_to = it.int_id
-            FROM    %s if,
-                    %s it
-            WHERE   ST_StartPoint(%s.geom) = if.geom
-            AND     %s.z_from = if.z_elev
-            AND     ST_EndPoint(%s.geom) = it.geom
-            AND     %s.z_to = it.z_elev;
-            ',  input_table_,
-                inttable,
-                inttable,
-                input_table_,
-                input_table_,
-                input_table_,
-                input_table_);
+            FROM    '||int_table||' if,
+                    '||int_table||' it
+            WHERE   '||road_table_||'.geom <#> if.geom < 5
+            AND     ST_StartPoint('||road_table_||'.geom) = if.geom
+            AND     '||road_table_||'.z_from = if.z_elev
+            AND     '||road_table_||'.geom <#> it.geom < 5
+            AND     ST_EndPoint('||road_table_||'.geom) = it.geom
+            AND     '||road_table_||'.z_to = it.z_elev;';
     END;
 
-    --triggers
+    --triggers to prevent changes
+    EXECUTE 'SELECT tdgMakeIntersectionTriggers($1,$2);'
+    USING   int_table,
+            table_name;
+
+    --triggers to update intersections when changes are made to roads
+    EXECUTE 'SELECT tdgMakeRoadTriggers($1,$2);'
+    USING   road_table_,
+            table_name;
+
+    --road intersection indexes
     BEGIN
-        EXECUTE format('
-            CREATE TRIGGER tdg%sGeomPreventUpdate
-                BEFORE UPDATE OF geom ON %s
-                FOR EACH ROW
-                EXECUTE PROCEDURE tdgTriggerDoNothing();
-            ',  table_name || '_ints',
-                inttable);
-        EXECUTE format('
-            CREATE TRIGGER tdg%sPreventInsDel
-                BEFORE INSERT OR DELETE ON %s
-                FOR EACH ROW
-                EXECUTE PROCEDURE tdgTriggerDoNothing();
-            ',  table_name || '_ints',
-                inttable);
+        RAISE NOTICE 'Adding indices to %', road_table_;
+        EXECUTE '
+            CREATE INDEX idx_'||table_name||'_intfrom ON '||road_table_||' (intersection_from);
+            CREATE INDEX idx_'||table_name||'_intto ON '||road_table_||' (intersection_to);';
     END;
+
+    --not null on road intersections
+    BEGIN
+        RAISE NOTICE 'Setting column constraints on %', road_table_;
+        EXECUTE '
+            ALTER TABLE '||table_name||' ALTER COLUMN intersection_from SET NOT NULL;
+            ALTER TABLE '||table_name||' ALTER COLUMN intersection_to SET NOT NULL;';
+    END;
+
+    RAISE NOTICE 'Analyzing';
+    EXECUTE 'ANALYZE '||road_table_||';';
+    EXECUTE 'ANALYZE '||int_table||';';
 
     RETURN 't';
 END $func$ LANGUAGE plpgsql;
@@ -2111,6 +1985,33 @@ ALTER FUNCTION tdg.tdgTableDetails(TEXT) OWNER TO gis;
 --         WHERE   c.oid = to_regclass(' || quote_literal(input_table) || ')';
 -- END $func$ LANGUAGE plpgsql;
 -- ALTER FUNCTION tdgTableDetails(TEXT) OWNER TO gis;
+CREATE OR REPLACE FUNCTION tdg.tdgMakeIntersectionTriggers(
+    int_table_ REGCLASS,
+    table_name_ TEXT)
+RETURNS BOOLEAN AS $func$
+
+BEGIN
+    RAISE NOTICE 'Creating triggers on %', int_table_;
+
+    --prevent updates/changes
+    EXECUTE format('
+        CREATE TRIGGER tdg%sGeomPreventUpdate
+            BEFORE UPDATE OF geom ON %s
+            FOR EACH ROW
+            EXECUTE PROCEDURE tdgTriggerDoNothing();
+        ',  table_name_ || '_ints',
+            int_table_);
+    EXECUTE format('
+        CREATE TRIGGER tdg%sPreventInsDel
+            BEFORE INSERT OR DELETE ON %s
+            FOR EACH ROW
+            EXECUTE PROCEDURE tdgTriggerDoNothing();
+        ',  table_name_ || '_ints',
+            int_table_);
+
+    RETURN 't';
+END $func$ LANGUAGE plpgsql;
+ALTER FUNCTION tdg.tdgMakeIntersectionTriggers(REGCLASS,TEXT) OWNER TO gis;
 CREATE OR REPLACE FUNCTION tdg.tdgRoadGeomChangeVals ()
 RETURNS TRIGGER
 AS $BODY$
@@ -2278,6 +2179,62 @@ BEGIN
 END;
 $BODY$ LANGUAGE plpgsql;
 ALTER FUNCTION tdg.tdgRoadGeomUpdate() OWNER TO gis;
+CREATE OR REPLACE FUNCTION tdg.tdgMakeRoadTriggers(
+    road_table_ REGCLASS,
+    table_name_ TEXT)
+RETURNS BOOLEAN AS $func$
+
+BEGIN
+    RAISE NOTICE 'Creating triggers on %', road_table_;
+
+    --------------------
+    --road geom changes
+    --------------------
+    -- create temp table
+    EXECUTE '
+        CREATE TRIGGER tr_tdg'||table_name_||'GeomUpdateTable
+            BEFORE UPDATE OF geom, z_from, z_to ON '||road_table_||'
+            FOR EACH STATEMENT
+            EXECUTE PROCEDURE tdgRoadGeomChangeTable();';
+    -- populate with vals
+    EXECUTE '
+        CREATE TRIGGER tr_tdg'||table_name_||'GeomUpdateVals
+            BEFORE UPDATE OF geom, z_from, z_to ON '||road_table_||'
+            FOR EACH ROW
+            EXECUTE PROCEDURE tdgRoadGeomChangeVals();';
+    -- update intersections
+    EXECUTE '
+        CREATE TRIGGER tr_tdg'||table_name_||'GeomUpdateIntersections
+            AFTER UPDATE OF geom, z_from, z_to ON '||road_table_||'
+            FOR EACH STATEMENT
+            EXECUTE PROCEDURE tdgRoadGeomUpdate();';
+
+
+    --------------------
+    --road insert/delete
+    --------------------
+    -- create temp table
+    EXECUTE '
+        CREATE TRIGGER tr_tdg'||table_name_||'GeomAddDelTable
+            BEFORE INSERT OR DELETE ON '||road_table_||'
+            FOR EACH STATEMENT
+            EXECUTE PROCEDURE tdgRoadGeomChangeTable();';
+    -- populate with vals
+    EXECUTE '
+        CREATE TRIGGER tr_tdg'||table_name_||'GeomAddDelVals
+            BEFORE INSERT OR DELETE ON '||road_table_||'
+            FOR EACH ROW
+            EXECUTE PROCEDURE tdgRoadGeomChangeVals();';
+    -- update intersections
+    EXECUTE '
+        CREATE TRIGGER tr_tdg'||table_name_||'GeomAddDelIntersections
+            AFTER INSERT OR DELETE ON '||road_table_||'
+            FOR EACH STATEMENT
+            EXECUTE PROCEDURE tdgRoadGeomUpdate();';
+
+    RETURN 't';
+END $func$ LANGUAGE plpgsql;
+ALTER FUNCTION tdg.tdgMakeRoadTriggers(REGCLASS,TEXT) OWNER TO gis;
 CREATE OR REPLACE FUNCTION tdg.tdgRoadGeomChangeTable ()
 RETURNS TRIGGER
 AS $BODY$
