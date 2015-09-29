@@ -343,7 +343,9 @@ BEGIN
     RETURN 't';
 END $func$ LANGUAGE plpgsql;
 ALTER FUNCTION tdg.tdgSetTurnInfo(REGCLASS,REGCLASS,REGCLASS,INT[]) OWNER TO gis;
-CREATE OR REPLACE FUNCTION tdg.tdgGenerateCrossStreetData(road_table_ REGCLASS)
+CREATE OR REPLACE FUNCTION tdg.tdgGenerateCrossStreetData(
+    road_table_ REGCLASS,
+    road_ids_ INTEGER[] DEFAULT NULL)
 --populate cross-street data
 RETURNS BOOLEAN AS $func$
 
@@ -353,11 +355,20 @@ DECLARE
 BEGIN
     raise notice 'PROCESSING:';
 
+    --compile list of int_ids_ if needed
+    IF road_ids_ IS NULL THEN
+        EXECUTE 'SELECT array_agg(road_id) FROM '||road_table_||';' INTO road_ids_;
+    END IF;
+
     int_table = road_table_ || '_intersections';
 
     RAISE NOTICE 'Clearing old values';
     EXECUTE '
-        UPDATE ' || road_table_ || ' SET road_from = NULL, road_to = NULL;';
+        UPDATE  ' || road_table_ || '
+        SET     road_from = NULL,
+                road_to = NULL
+        WHERE   road_id = ANY ($1);'
+    USING   road_ids_;
 
     --ignore culs-de-sac (legs = 1)
 
@@ -373,7 +384,9 @@ BEGIN
         AND     '||road_table_||'.intersection_from = i.int_id
         AND     i.int_id IN (r.intersection_from,r.intersection_to)
         AND     '||road_table_||'.z_from = r.z_from
-        AND     '||road_table_||'.road_id != r.road_id;';
+        AND     '||road_table_||'.road_id != r.road_id
+        AND     '||road_table_||'.road_id = ANY ($1);'
+    USING   road_ids_;
     --to streets
     EXECUTE '
         UPDATE  '||road_table_||'
@@ -384,7 +397,9 @@ BEGIN
         AND     '||road_table_||'.intersection_to = i.int_id
         AND     i.int_id IN (r.intersection_from,r.intersection_to)
         AND     '||road_table_||'.z_to = r.z_to
-        AND     '||road_table_||'.road_id != r.road_id;';
+        AND     '||road_table_||'.road_id != r.road_id
+        AND     '||road_table_||'.road_id = ANY ($1);'
+    USING   road_ids_;
 
     --get road name of leg nearest to 90 degrees
     RAISE NOTICE 'Assigning cross streets for intersections';
@@ -400,13 +415,16 @@ BEGIN
             JOIN    '||road_table_||' b
                         ON a.intersection_from IN (b.intersection_from,b.intersection_to)
                         AND a.road_id != b.road_id
+            WHERE   a.road_id = ANY ($1)
         )
         UPDATE  '||road_table_||'
         SET     road_from = (   SELECT      x.road_name
                                 FROM        x
                                 WHERE       '||road_table_||'.road_id = x.this_id
                                 ORDER BY    ABS(SIN(RADIANS(MOD(360 + x.xing_azi - x.this_azi,360)))) DESC
-                                LIMIT       1)';
+                                LIMIT       1)
+        WHERE   road_id = ANY ($1)'
+    USING   road_ids_;
 --ORDER BY    ABS(90 - (mod(mod(360 + x.xing_azi - x.this_azi, 360), 180) )) ASC
     --to streets
     EXECUTE '
@@ -420,17 +438,20 @@ BEGIN
             JOIN    '||road_table_||' b
                         ON a.intersection_to IN (b.intersection_from,b.intersection_to)
                         AND a.road_id != b.road_id
+            WHERE   a.road_id = ANY ($1)
         )
         UPDATE  '||road_table_||'
         SET     road_to = (     SELECT      x.road_name
                                 FROM        x
                                 WHERE       '||road_table_||'.road_id = x.this_id
                                 ORDER BY    ABS(SIN(RADIANS(MOD(360 + x.xing_azi - x.this_azi,360)))) DESC
-                                LIMIT       1)';
+                                LIMIT       1)
+        WHERE   road_id = ANY ($1)'
+    USING   road_ids_;
 
     RETURN 't';
 END $func$ LANGUAGE plpgsql;
-ALTER FUNCTION tdg.tdgGenerateCrossStreetData(REGCLASS) OWNER TO gis;
+ALTER FUNCTION tdg.tdgGenerateCrossStreetData(REGCLASS,INTEGER[]) OWNER TO gis;
 CREATE OR REPLACE FUNCTION tdgTableCheck (input_table REGCLASS)
 RETURNS BOOLEAN AS $func$
 
