@@ -1075,7 +1075,7 @@ DECLARE
     intersection_table TEXT;
     querytext TEXT;
     srid INT;
-
+    bad_one_way_id INT;
 BEGIN
     raise notice 'PROCESSING:';
 
@@ -1129,62 +1129,63 @@ BEGIN
     --create new table
     BEGIN
         RAISE NOTICE 'Creating table %', road_table;
-        EXECUTE format('
-            CREATE TABLE %s (   road_id SERIAL PRIMARY KEY,
-                                geom geometry(linestring,%L),
-                                road_name TEXT,
-                                road_from TEXT,
-                                road_to TEXT,
-                                z_from INT DEFAULT 0,
-                                z_to INT DEFAULT 0,
-                                intersection_from INT,
-                                intersection_to INT,
-                                source_data TEXT,
-                                source_id TEXT,
-                                functional_class TEXT,
-                                one_way VARCHAR(2),
-                                speed_limit INT,
-                                adt INT,
-                                ft_seg_lanes_thru INT,
-                                ft_seg_lanes_bike_wd_ft INT,
-                                ft_seg_lanes_park_wd_ft INT,
-                                ft_seg_stress_override INT,
-                                ft_seg_stress INT,
-                                ft_int_lanes_thru INT,
-                                ft_int_lanes_lt INT,
-                                ft_int_lanes_rt_len_ft INT,
-                                ft_int_lanes_rt_radius_speed_mph INT,
-                                ft_int_lanes_bike_wd_ft INT,
-                                ft_int_lanes_bike_straight INT,
-                                ft_int_stress_override INT,
-                                ft_int_stress INT,
-                                ft_cross_median_wd_ft INT,
-                                ft_cross_signal INT,
-                                ft_cross_speed_limit INT,
-                                ft_cross_lanes INT,
-                                ft_cross_stress_override INT,
-                                ft_cross_stress INT,
-                                tf_seg_lanes_thru INT,
-                                tf_seg_lanes_bike_wd_ft INT,
-                                tf_seg_lanes_park_wd_ft INT,
-                                tf_seg_stress_override INT,
-                                tf_seg_stress INT,
-                                tf_int_lanes_thru INT,
-                                tf_int_lanes_lt INT,
-                                tf_int_lanes_rt_len_ft INT,
-                                tf_int_lanes_rt_radius_speed_mph INT,
-                                tf_int_lanes_bike_wd_ft INT,
-                                tf_int_lanes_bike_straight INT,
-                                tf_int_stress_override INT,
-                                tf_int_stress INT,
-                                tf_cross_median_wd_ft INT,
-                                tf_cross_signal INT,
-                                tf_cross_speed_limit INT,
-                                tf_cross_lanes INT,
-                                tf_cross_stress_override INT,
-                                tf_cross_stress INT)
-            ',  road_table,
-                srid);
+        EXECUTE '
+            CREATE TABLE '||road_table||' (
+                road_id SERIAL PRIMARY KEY,
+                geom geometry(linestring,'||srid::TEXT||'),
+                road_name TEXT,
+                road_from TEXT,
+                road_to TEXT,
+                z_from INT DEFAULT 0,
+                z_to INT DEFAULT 0,
+                intersection_from INT,
+                intersection_to INT,
+                source_data TEXT,
+                source_id TEXT,
+                functional_class TEXT,
+                one_way VARCHAR(2) CHECK (
+                    one_way = '||quote_literal('ft')||'
+                    OR one_way = '||quote_literal('tf')||'),
+                speed_limit INT,
+                adt INT,
+                ft_seg_lanes_thru INT,
+                ft_seg_lanes_bike_wd_ft INT,
+                ft_seg_lanes_park_wd_ft INT,
+                ft_seg_stress_override INT,
+                ft_seg_stress INT,
+                ft_int_lanes_thru INT,
+                ft_int_lanes_lt INT,
+                ft_int_lanes_rt_len_ft INT,
+                ft_int_lanes_rt_radius_speed_mph INT,
+                ft_int_lanes_bike_wd_ft INT,
+                ft_int_lanes_bike_straight INT,
+                ft_int_stress_override INT,
+                ft_int_stress INT,
+                ft_cross_median_wd_ft INT,
+                ft_cross_signal INT,
+                ft_cross_speed_limit INT,
+                ft_cross_lanes INT,
+                ft_cross_stress_override INT,
+                ft_cross_stress INT,
+                tf_seg_lanes_thru INT,
+                tf_seg_lanes_bike_wd_ft INT,
+                tf_seg_lanes_park_wd_ft INT,
+                tf_seg_stress_override INT,
+                tf_seg_stress INT,
+                tf_int_lanes_thru INT,
+                tf_int_lanes_lt INT,
+                tf_int_lanes_rt_len_ft INT,
+                tf_int_lanes_rt_radius_speed_mph INT,
+                tf_int_lanes_bike_wd_ft INT,
+                tf_int_lanes_bike_straight INT,
+                tf_int_stress_override INT,
+                tf_int_stress INT,
+                tf_cross_median_wd_ft INT,
+                tf_cross_signal INT,
+                tf_cross_speed_limit INT,
+                tf_cross_lanes INT,
+                tf_cross_stress_override INT,
+                tf_cross_stress INT);';
     END;
 
     --copy features over
@@ -1246,6 +1247,20 @@ BEGIN
         querytext := querytext || ' FROM ' ||input_table_|| ' r';
 
         EXECUTE querytext;
+
+    EXCEPTION
+        WHEN check_violation THEN
+            EXECUTE '
+                SELECT  id
+                FROM    '||input_table_||'
+                WHERE   '||quote_ident(oneway_field_)||' IS NOT NULL
+                AND     '||quote_ident(oneway_field_)||' NOT IN ($1,$2)
+                LIMIT   1'
+            INTO    bad_one_way_id
+            USING   'ft',
+                    'tf';
+            RAISE EXCEPTION 'Bad one_way value on feature id %', bad_one_way_id
+            USING HINT = 'Value must be "ft" or "tf"';
     END;
 
     --indexes
