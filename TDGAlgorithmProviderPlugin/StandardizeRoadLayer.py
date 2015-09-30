@@ -211,7 +211,7 @@ class StandardizeRoadLayer(GeoAlgorithm):
         else:
             sql = sql + "'f')"
         try:
-            db._exec_sql_and_commit(sql)
+            db._exec_sql(sql)
         except:
             raise
         progress.setPercentage(3)
@@ -272,7 +272,7 @@ class StandardizeRoadLayer(GeoAlgorithm):
             sql = sql[:-1]                  #remove the last comma
             sql = sql + "}'::INTEGER[])"    #finish the call
             try:
-                db._exec_sql_and_commit(baseSql + sql)
+                db._exec_sql(baseSql + sql)
                 progress.setPercentage(3+50*count/len(featureIds))
                 sql = "'{"
                 count = count + 100
