@@ -452,6 +452,36 @@ BEGIN
     RETURN 't';
 END $func$ LANGUAGE plpgsql;
 ALTER FUNCTION tdg.tdgGenerateCrossStreetData(REGCLASS,INTEGER[]) OWNER TO gis;
+CREATE OR REPLACE FUNCTION tdg.tdgInsertIntersections(
+    int_table_ REGCLASS,
+    road_table_ REGCLASS)
+RETURNS BOOLEAN AS $func$
+
+DECLARE
+    rowcount INT;
+
+BEGIN
+    RAISE NOTICE 'Checking for existing intersections in %', int_table_;
+    EXECUTE 'SELECT 1 FROM '||int_table_||' WHERE int_id IS NOT NULL;';
+    GET DIAGNOSTICS rowcount = ROW_COUNT;
+
+    IF rowcount > 0 THEN
+        RAISE EXCEPTION 'Records already exist in %', int_table_
+        USING HINT = 'Drop all existing records or use road_ids as an input.';
+    END IF;
+
+    RAISE NOTICE 'Inserting intersections into %', int_table_;
+    EXECUTE '
+        INSERT INTO '||int_table_||' (geom, z_elev)
+        SELECT  ST_StartPoint(road_f.geom), road_f.z_from
+        FROM    '||road_table_||' road_f
+        UNION
+        SELECT  ST_EndPoint(road_t.geom), road_t.z_to
+        FROM    '||road_table_||' road_t';
+
+    RETURN 't';
+END $func$ LANGUAGE plpgsql;
+ALTER FUNCTION tdg.tdgInsertIntersections(REGCLASS,REGCLASS) OWNER TO gis;
 CREATE OR REPLACE FUNCTION tdgTableCheck (input_table REGCLASS)
 RETURNS BOOLEAN AS $func$
 
@@ -470,349 +500,6 @@ BEGIN
 RETURN 't';
 END $func$ LANGUAGE plpgsql;
 ALTER FUNCTION tdgTableCheck(REGCLASS) OWNER TO gis;
-CREATE OR REPLACE FUNCTION tdg.tdgMultiToSingle (
-    temp_table_ REGCLASS,
-    new_table_ TEXT,
-    schema_ TEXT,
-    srid_ INTEGER,
-    overwrite_ BOOLEAN)
-RETURNS BOOLEAN AS $func$
-
-DECLARE
-    namecheck TEXT;
-    primarykeycolumn TEXT;
-    columndetails RECORD;
-    newcolumnname TEXT;
-    columncount INT;
-    addstatement TEXT;
-    copystatement TEXT;
-
-BEGIN
-    --create schema if needed
-    EXECUTE 'CREATE SCHEMA IF NOT EXISTS ' || schema_ || ';';
-
-    --drop table if overwrite
-    IF overwrite_ THEN
-        EXECUTE 'DROP TABLE IF EXISTS ' || schema_ || '.' || new_table_ || ';';
-    ELSE
-        RAISE NOTICE 'Checking whether table % exists',new_table_;
-        EXECUTE '   SELECT  table_name
-                    FROM    tdgTableDetails($1)'
-        USING   schema_ || '.' || new_table_
-        INTO    namecheck;
-
-        IF NOT namecheck IS NULL THEN
-            RAISE EXCEPTION 'Table % already exists', new_table_;
-        END IF;
-    END IF;
-
-    --get temp table primary key column name
-    RAISE NOTICE 'Getting primary key from %', temp_table_;
-    EXECUTE '
-        SELECT a.attname
-        FROM   pg_index i
-        JOIN   pg_attribute a
-                    ON a.attrelid = i.indrelid
-                    AND a.attnum = ANY(i.indkey)
-        WHERE  i.indrelid = $1::regclass
-        AND    i.indisprimary;'
-    USING   schema_ || '.' || temp_table_
-    INTO    primarykeycolumn;
-
-    --create new table
-    RAISE NOTICE 'Creating table %',new_table_;
-    EXECUTE '   CREATE TABLE ' || schema_ || '.' || new_table_ || '
-                    ( ' || primarykeycolumn || ' SERIAL PRIMARY KEY,
-                        temp_id INTEGER,
-                        tdg_id TEXT NOT NULL DEFAULT uuid_generate_v4()::TEXT,
-                        geom geometry(LINESTRING,' || srid_::TEXT || '));';
-
-    --insert info from temporary table
-    EXECUTE '   INSERT INTO ' || schema_ || '.' || new_table_ || ' (temp_id,geom)
-                SELECT ' || primarykeycolumn || ',ST_Transform((ST_Dump(geom)).geom,$1)
-                FROM ' || temp_table_ || ';'
-    USING   srid_;
-
-
-    --copy table structure from temporary table
-    RAISE NOTICE 'Copying table structure from %', temp_table_;
-
-    --loop through temp table columns and build statements to copy data
-    columncount := 0;
-    addstatement := 'ALTER TABLE ' || schema_ || '.' || new_table_ || ' ';
-    copystatement := 'UPDATE ' || schema_ || '.' || new_table_ || ' SET ';
-    FOR columndetails IN
-    EXECUTE '
-        SELECT  a.attname AS col,
-                pg_catalog.format_type(a.atttypid, a.atttypmod) AS datatype
-        FROM    pg_catalog.pg_attribute a
-        WHERE   a.attnum > 0
-        AND     NOT a.attisdropped
-        AND     a.attrelid = ' || quote_literal(temp_table_) || '::REGCLASS;'
-    LOOP
-        IF columndetails.col NOT IN (primarykeycolumn,'geom','tdg_id') THEN
-            RAISE NOTICE 'Found column %', columndetails.col;
-            --advance count
-            columncount := columncount + 1;
-
-            --sanitize column name
-            newcolumnname := regexp_replace(LOWER(columndetails.col), '[^a-zA-Z0-9_]', '', 'g');
-            IF columncount = 1 THEN
-                addstatement := addstatement || ' ADD COLUMN '
-                                || newcolumnname || ' '
-                                || columndetails.datatype;
-            ELSE
-                addstatement := addstatement || ', ADD COLUMN '
-                                || newcolumnname || ' '
-                                || columndetails.datatype;
-            END IF;
-
-            --copy data over
-            IF columncount = 1 THEN
-                copystatement := copystatement || newcolumnname || '=t.'
-                                || quote_ident(columndetails.col);
-            ELSE
-                copystatement := copystatement || ',' || newcolumnname || '=t.'
-                                || quote_ident(columndetails.col);
-            END IF;
-        END IF;
-    END LOOP;
-
-    copystatement := copystatement || ' FROM ' || temp_table_ || ' t WHERE t.'
-        || primarykeycolumn || ' = ' || schema_ || '.' || new_table_ || '.temp_id;';
-
-    RAISE NOTICE 'Adding columns';
-    EXECUTE addstatement;
-    RAISE NOTICE 'Copying data';
-    EXECUTE copystatement;
-
-    --drop the temp_id column
-    RAISE NOTICE 'Dropping temoporary ID column';
-    EXECUTE 'ALTER TABLE ' || schema_ || '.' || new_table_ || ' DROP COLUMN temp_id;';
-
-    --drop the temporary table
-    RAISE NOTICE 'Dropping temoporary table';
-    EXECUTE 'DROP TABLE ' || temp_table_ || ';';
-
-    RETURN 't';
-
-END $func$ LANGUAGE plpgsql;
-ALTER FUNCTION tdg.tdgMultiToSingle(REGCLASS,TEXT,TEXT,INTEGER,BOOLEAN) OWNER TO gis;
-CREATE OR REPLACE FUNCTION tdg.tdgInsertStandardizedRoadLayer(
-    input_table_ REGCLASS,
-    road_table_ REGCLASS,
-    id_field_ TEXT,
-    name_field_ TEXT,
-    z_from_field_ TEXT,
-    z_to_field_ TEXT,
-    adt_field_ TEXT,
-    speed_field_ TEXT,
-    func_field_ TEXT,
-    oneway_field_ TEXT,
-    input_ids_ INTEGER[] DEFAULT NULL)
-RETURNS BOOLEAN AS $func$
-
-DECLARE
-    id_column TEXT;
-    table_name TEXT;
-    road_table TEXT;
-    querytext TEXT;
-    bad_one_way_id INT;
-BEGIN
-    -- get column name of primary key
-    EXECUTE '
-        SELECT a.attname
-        FROM   pg_index i
-        JOIN   pg_attribute a ON a.attrelid = i.indrelid
-                             AND a.attnum = ANY(i.indkey)
-        WHERE  i.indrelid = $1
-        AND    i.indisprimary;'
-    USING   input_table_
-    INTO    id_column;
-
-    --compile list of int_ids_ if needed
-    IF input_ids_ IS NULL THEN
-        EXECUTE 'SELECT array_agg('||id_column||') FROM '||input_table_||';'
-        INTO    input_ids_;
-    END IF;
-
-    --copy features over
-    BEGIN
-        RAISE NOTICE 'Copying features to %', road_table_;
-        --querytext := '';
-        querytext := '   INSERT INTO ' || road_table_ || ' (geom';
-        querytext := querytext || ',source_data';
-        IF name_field_ IS NOT NULL THEN
-            querytext := querytext || ',road_name';
-            END IF;
-        IF id_field_ IS NOT NULL THEN
-            querytext := querytext || ',source_id';
-            END IF;
-        IF func_field_ IS NOT NULL THEN
-            querytext := querytext || ',functional_class';
-            END IF;
-        IF oneway_field_ IS NOT NULL THEN
-            querytext := querytext || ',one_way';
-            END IF;
-        IF speed_field_ IS NOT NULL THEN
-            querytext := querytext || ',speed_limit';
-            END IF;
-        IF adt_field_ IS NOT NULL THEN
-            querytext := querytext || ',adt';
-            END IF;
-        IF z_from_field_ IS NOT NULL THEN
-            querytext := querytext || ',z_from';
-            END IF;
-        IF z_to_field_ IS NOT NULL THEN
-            querytext := querytext || ',z_to';
-            END IF;
-        querytext := querytext || ') SELECT ST_SnapToGrid(r.geom,2)';
-        querytext := querytext || ',' || quote_literal(input_table_);
-        IF name_field_ IS NOT NULL THEN
-            querytext := querytext || ',' || quote_ident(name_field_);
-            END IF;
-        IF id_field_ IS NOT NULL THEN
-            querytext := querytext || ',' || quote_ident(id_field_);
-            END IF;
-        IF func_field_ IS NOT NULL THEN
-            querytext := querytext || ',' || quote_ident(func_field_);
-            END IF;
-        IF oneway_field_ IS NOT NULL THEN
-            querytext := querytext || ',' || quote_ident(oneway_field_);
-            END IF;
-        IF speed_field_ IS NOT NULL THEN
-            querytext := querytext || ',' || quote_ident(speed_field_);
-            END IF;
-        IF adt_field_ IS NOT NULL THEN
-            querytext := querytext || ',' || quote_ident(adt_field_);
-            END IF;
-        IF z_from_field_ IS NOT NULL THEN
-            querytext := querytext || ',' || quote_ident(z_from_field_);
-            END IF;
-        IF z_to_field_ IS NOT NULL THEN
-            querytext := querytext || ',' || quote_ident(z_to_field_);
-            END IF;
-        querytext := querytext || ' FROM ' ||input_table_|| ' r';
-
-        EXECUTE querytext;
-
-    EXCEPTION
-        WHEN check_violation THEN
-            EXECUTE '
-                SELECT  '||id_column||'
-                FROM    '||input_table_||'
-                WHERE   '||quote_ident(oneway_field_)||' IS NOT NULL
-                AND     '||quote_ident(oneway_field_)||' NOT IN ($1,$2)
-                LIMIT   1'
-            INTO    bad_one_way_id
-            USING   'ft',
-                    'tf';
-            RAISE EXCEPTION 'Bad one_way value on feature id %', bad_one_way_id
-            USING HINT = 'Value must be "ft" or "tf"';
-    END;
-
-    --create indexes
-    EXECUTE 'SELECT tdgMakeStandardizedRoadIndexes($1);'
-    USING   road_table_;
-
-    RETURN 't';
-END $func$ LANGUAGE plpgsql;
-ALTER FUNCTION tdg.tdgInsertStandardizedRoadLayer(
-    REGCLASS,REGCLASS,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,
-    TEXT,TEXT,INTEGER[]) OWNER TO gis;
-CREATE OR REPLACE FUNCTION tdgShortestPathVerts (   linktable_ REGCLASS,
-                                                    verttable_ REGCLASS,
-                                                    from_ INT,
-                                                    to_ INT,
-                                                    stress_ INT DEFAULT NULL)
-RETURNS SETOF tdgShortestPathType AS $$
-
-import networkx as nx
-
-# check node existence
-qc = plpy.execute('SELECT EXISTS (SELECT 1 FROM %s WHERE node_id = %s)' % (verttable_,from_))
-if not qc[0]['exists']:
-    plpy.error('From vertex does not exist.')
-qc = plpy.execute('SELECT EXISTS (SELECT 1 FROM %s WHERE node_id = %s)' % (verttable_,to_))
-if not qc[0]['exists']:
-    plpy.error('To vertex does not exist.')
-
-# create the graph
-DG=nx.DiGraph()
-
-# read input stress
-stress = 99
-if not stress_ is None:
-    stress = stress_
-
-# edges first
-edges = plpy.execute('SELECT * FROM %s;' % linktable_)
-for e in edges:
-    DG.add_edge(e['source_node'],
-                e['target_node'],
-                weight=max(e['link_cost'],0),
-                link_id=e['id'],
-                stress=min(e['link_stress'],99),
-                road_id=e['road_id'])
-
-# then vertices
-verts = plpy.execute('SELECT * FROM %s;' % verttable_)
-for v in verts:
-    vid = v['node_id']
-    DG.node[vid]['weight'] = max(v['node_cost'],0)
-    DG.node[vid]['intersection_id'] = v['intersection_id']
-
-
-# get the shortest path
-plpy.info('Checking for path existence')
-if nx.has_path(DG,source=from_,target=to_):
-    plpy.info('Path found')
-    shortestPath = nx.shortest_path(DG,source=from_,target=to_,weight='weight')
-else:
-    plpy.error('No path between given vertices')
-
-
-# set up function to return edges
-def getNextNode(nodes,node):
-    pos = nodes.index(node)
-    try:
-        return nodes[pos+1]
-    except:
-        return None
-
-
-# build the return values
-ret = []
-seq = 0
-for v1 in shortestPath:
-    seq = seq + 1
-    v2 = getNextNode(shortestPath,v1)
-    if v2:
-        ret.append((seq,
-                    None,
-                    v1,
-                    None,
-                    DG.node[v1]['intersection_id'],
-                    DG.node[v1]['weight']))
-        seq = seq + 1
-        ret.append((seq,
-                    DG.edge[v1][v2]['link_id'],
-                    None,
-                    DG.edge[v1][v2]['road_id'],
-                    None,
-                    DG.edge[v1][v2]['weight']))
-    else:
-        ret.append((seq,
-                    None,
-                    v1,
-                    None,
-                    DG.node[v1]['intersection_id'],
-                    DG.node[v1]['weight']))
-
-return ret
-
-$$ LANGUAGE plpythonu;
-ALTER FUNCTION tdgShortestPathVerts(REGCLASS,REGCLASS,INT,INT,INT) OWNER TO gis;
 CREATE OR REPLACE FUNCTION tdg.tdgMakeStandardizedRoadLayer(
     input_table_ REGCLASS,
     output_schema_ TEXT,
@@ -942,6 +629,294 @@ BEGIN
 END $func$ LANGUAGE plpgsql;
 ALTER FUNCTION tdg.tdgMakeStandardizedRoadLayer(
     REGCLASS,TEXT,TEXT,BOOLEAN) OWNER TO gis;
+CREATE OR REPLACE FUNCTION tdg.tdgMultiToSingle (
+    temp_table_ REGCLASS,
+    new_table_ TEXT,
+    schema_ TEXT,
+    srid_ INTEGER,
+    overwrite_ BOOLEAN)
+RETURNS BOOLEAN AS $func$
+
+DECLARE
+    namecheck TEXT;
+    primarykeycolumn TEXT;
+    columndetails RECORD;
+    newcolumnname TEXT;
+    columncount INT;
+    addstatement TEXT;
+    copystatement TEXT;
+
+BEGIN
+    --create schema if needed
+    EXECUTE 'CREATE SCHEMA IF NOT EXISTS ' || schema_ || ';';
+
+    --drop table if overwrite
+    IF overwrite_ THEN
+        EXECUTE 'DROP TABLE IF EXISTS ' || schema_ || '.' || new_table_ || ';';
+    ELSE
+        RAISE NOTICE 'Checking whether table % exists',new_table_;
+        EXECUTE '   SELECT  table_name
+                    FROM    tdgTableDetails($1)'
+        USING   schema_ || '.' || new_table_
+        INTO    namecheck;
+
+        IF NOT namecheck IS NULL THEN
+            RAISE EXCEPTION 'Table % already exists', new_table_;
+        END IF;
+    END IF;
+
+    --get temp table primary key column name
+    RAISE NOTICE 'Getting primary key from %', temp_table_;
+    EXECUTE '
+        SELECT a.attname
+        FROM   pg_index i
+        JOIN   pg_attribute a
+                    ON a.attrelid = i.indrelid
+                    AND a.attnum = ANY(i.indkey)
+        WHERE  i.indrelid = $1::regclass
+        AND    i.indisprimary;'
+    USING   schema_ || '.' || temp_table_
+    INTO    primarykeycolumn;
+
+    --create new table
+    RAISE NOTICE 'Creating table %',new_table_;
+    EXECUTE '   CREATE TABLE ' || schema_ || '.' || new_table_ || '
+                    ( ' || primarykeycolumn || ' SERIAL PRIMARY KEY,
+                        temp_id INTEGER,
+                        tdg_id TEXT NOT NULL DEFAULT uuid_generate_v4()::TEXT,
+                        geom geometry(LINESTRING,' || srid_::TEXT || '));';
+
+    --insert info from temporary table
+    EXECUTE '   INSERT INTO ' || schema_ || '.' || new_table_ || ' (temp_id,geom)
+                SELECT ' || primarykeycolumn || ',ST_Transform((ST_Dump(geom)).geom,$1)
+                FROM ' || temp_table_ || ';'
+    USING   srid_;
+
+
+    --copy table structure from temporary table
+    RAISE NOTICE 'Copying table structure from %', temp_table_;
+
+    --loop through temp table columns and build statements to copy data
+    columncount := 0;
+    addstatement := 'ALTER TABLE ' || schema_ || '.' || new_table_ || ' ';
+    copystatement := 'UPDATE ' || schema_ || '.' || new_table_ || ' SET ';
+    FOR columndetails IN
+    EXECUTE '
+        SELECT  a.attname AS col,
+                pg_catalog.format_type(a.atttypid, a.atttypmod) AS datatype
+        FROM    pg_catalog.pg_attribute a
+        WHERE   a.attnum > 0
+        AND     NOT a.attisdropped
+        AND     a.attrelid = ' || quote_literal(temp_table_) || '::REGCLASS;'
+    LOOP
+        IF columndetails.col NOT IN (primarykeycolumn,'geom','tdg_id') THEN
+            RAISE NOTICE 'Found column %', columndetails.col;
+            --advance count
+            columncount := columncount + 1;
+
+            --sanitize column name
+            newcolumnname := regexp_replace(LOWER(columndetails.col), '[^a-zA-Z0-9_]', '', 'g');
+            IF columncount = 1 THEN
+                addstatement := addstatement || ' ADD COLUMN '
+                                || newcolumnname || ' '
+                                || columndetails.datatype;
+            ELSE
+                addstatement := addstatement || ', ADD COLUMN '
+                                || newcolumnname || ' '
+                                || columndetails.datatype;
+            END IF;
+
+            --copy data over
+            IF columncount = 1 THEN
+                copystatement := copystatement || newcolumnname || '=t.'
+                                || quote_ident(columndetails.col);
+            ELSE
+                copystatement := copystatement || ',' || newcolumnname || '=t.'
+                                || quote_ident(columndetails.col);
+            END IF;
+        END IF;
+    END LOOP;
+
+    copystatement := copystatement || ' FROM ' || temp_table_ || ' t WHERE t.'
+        || primarykeycolumn || ' = ' || schema_ || '.' || new_table_ || '.temp_id;';
+
+    RAISE NOTICE 'Adding columns';
+    EXECUTE addstatement;
+    RAISE NOTICE 'Copying data';
+    EXECUTE copystatement;
+
+    --drop the temp_id column
+    RAISE NOTICE 'Dropping temoporary ID column';
+    EXECUTE 'ALTER TABLE ' || schema_ || '.' || new_table_ || ' DROP COLUMN temp_id;';
+
+    --drop the temporary table
+    RAISE NOTICE 'Dropping temoporary table';
+    EXECUTE 'DROP TABLE ' || temp_table_ || ';';
+
+    RETURN 't';
+
+END $func$ LANGUAGE plpgsql;
+ALTER FUNCTION tdg.tdgMultiToSingle(REGCLASS,TEXT,TEXT,INTEGER,BOOLEAN) OWNER TO gis;
+CREATE OR REPLACE FUNCTION tdgShortestPathVerts (   linktable_ REGCLASS,
+                                                    verttable_ REGCLASS,
+                                                    from_ INT,
+                                                    to_ INT,
+                                                    stress_ INT DEFAULT NULL)
+RETURNS SETOF tdgShortestPathType AS $$
+
+import networkx as nx
+
+# check node existence
+qc = plpy.execute('SELECT EXISTS (SELECT 1 FROM %s WHERE node_id = %s)' % (verttable_,from_))
+if not qc[0]['exists']:
+    plpy.error('From vertex does not exist.')
+qc = plpy.execute('SELECT EXISTS (SELECT 1 FROM %s WHERE node_id = %s)' % (verttable_,to_))
+if not qc[0]['exists']:
+    plpy.error('To vertex does not exist.')
+
+# create the graph
+DG=nx.DiGraph()
+
+# read input stress
+stress = 99
+if not stress_ is None:
+    stress = stress_
+
+# edges first
+edges = plpy.execute('SELECT * FROM %s;' % linktable_)
+for e in edges:
+    DG.add_edge(e['source_node'],
+                e['target_node'],
+                weight=max(e['link_cost'],0),
+                link_id=e['id'],
+                stress=min(e['link_stress'],99),
+                road_id=e['road_id'])
+
+# then vertices
+verts = plpy.execute('SELECT * FROM %s;' % verttable_)
+for v in verts:
+    vid = v['node_id']
+    DG.node[vid]['weight'] = max(v['node_cost'],0)
+    DG.node[vid]['intersection_id'] = v['intersection_id']
+
+
+# get the shortest path
+plpy.info('Checking for path existence')
+if nx.has_path(DG,source=from_,target=to_):
+    plpy.info('Path found')
+    shortestPath = nx.shortest_path(DG,source=from_,target=to_,weight='weight')
+else:
+    plpy.error('No path between given vertices')
+
+
+# set up function to return edges
+def getNextNode(nodes,node):
+    pos = nodes.index(node)
+    try:
+        return nodes[pos+1]
+    except:
+        return None
+
+
+# build the return values
+ret = []
+seq = 0
+for v1 in shortestPath:
+    seq = seq + 1
+    v2 = getNextNode(shortestPath,v1)
+    if v2:
+        ret.append((seq,
+                    None,
+                    v1,
+                    None,
+                    DG.node[v1]['intersection_id'],
+                    DG.node[v1]['weight']))
+        seq = seq + 1
+        ret.append((seq,
+                    DG.edge[v1][v2]['link_id'],
+                    None,
+                    DG.edge[v1][v2]['road_id'],
+                    None,
+                    DG.edge[v1][v2]['weight']))
+    else:
+        ret.append((seq,
+                    None,
+                    v1,
+                    None,
+                    DG.node[v1]['intersection_id'],
+                    DG.node[v1]['weight']))
+
+return ret
+
+$$ LANGUAGE plpythonu;
+ALTER FUNCTION tdgShortestPathVerts(REGCLASS,REGCLASS,INT,INT,INT) OWNER TO gis;
+CREATE OR REPLACE FUNCTION tdg.tdgInsertIntersections(
+    int_table_ REGCLASS,
+    road_table_ REGCLASS,
+    road_ids INTEGER[])
+RETURNS BOOLEAN AS $func$
+
+BEGIN
+    RAISE NOTICE 'Inserting intersections into %', int_table_;
+
+    -- create staging table
+    EXECUTE '
+        CREATE TEMPORARY TABLE tmp_ints (
+            geom geometry(point),
+            z_elev INTEGER)
+        ON COMMIT DROP;';
+
+    -- add candidate points
+    EXECUTE '
+        INSERT INTO tmp_ints (geom, z_elev)
+        SELECT  ST_StartPoint(road_f.geom), road_f.z_from
+        FROM    '||road_table_||' road_f
+        WHERE   road_f.road_id = ANY ($1);
+        INSERT INTO tmp_ints (geom, z_elev)
+        SELECT  ST_EndPoint(road_t.geom), road_t.z_to
+        FROM    '||road_table_||' road_t
+        WHERE   road_t.road_id = ANY ($1);';
+
+    -- move to intersection table
+    EXECUTE '
+        INSERT INTO '||int_table_||' (geom, z_elev)
+        SELECT DISTINCT geom, z_elev
+        WHERE NOT EXISTS (  SELECT  1
+                            FROM    '||int_table_||' i
+                            WHERE   '||int_table_||'.geom = i.geom
+                            and     '||int_table_||'.z_elev = i.z_elev)';
+
+    RETURN 't';
+END $func$ LANGUAGE plpgsql;
+ALTER FUNCTION tdg.tdgInsertIntersections(REGCLASS,REGCLASS,INTEGER[]) OWNER TO gis;
+CREATE OR REPLACE FUNCTION tdg.tdgSetIntersectionLegs(
+    int_table_ REGCLASS,
+    road_table_ REGCLASS,
+    int_ids_ INTEGER[] DEFAULT NULL)
+RETURNS BOOLEAN AS $func$
+
+DECLARE
+    sql TEXT;
+
+BEGIN
+    RAISE NOTICE 'Setting intersection legs on %', int_table_;
+    sql := '
+        UPDATE  '||int_table_||'
+        SET     legs = (SELECT  COUNT(roads.road_id)
+                        FROM    '||road_table_||' roads
+                        WHERE   '||int_table_||'.int_id = roads.intersection_from
+                        OR      '||int_table_||'.int_id = roads.intersection_to)';
+
+    IF int_ids_ IS NULL THEN
+        EXECUTE sql;
+    ELSE
+        EXECUTE sql || ' WHERE int_id = ANY($1)'
+        USING   int_ids_;
+    END IF;
+
+    RETURN 't';
+END $func$ LANGUAGE plpgsql;
+ALTER FUNCTION tdg.tdgSetIntersectionLegs(REGCLASS,REGCLASS,INTEGER[]) OWNER TO gis;
 CREATE OR REPLACE FUNCTION tdgUpdateNetwork (input_table REGCLASS, rowids INT[])
 RETURNS BOOLEAN AS $func$
 
@@ -952,6 +927,46 @@ BEGIN
 RETURN 't';
 END $func$ LANGUAGE plpgsql;
 ALTER FUNCTION tdgUpdateNetwork(REGCLASS,INT[]) OWNER TO gis;
+CREATE OR REPLACE FUNCTION tdg.tdgSetRoadIntersections(
+    int_table_ REGCLASS,
+    road_table_ REGCLASS,
+    road_ids_ INTEGER[] DEFAULT NULL)
+RETURNS BOOLEAN AS $func$
+
+BEGIN
+    --compile list of int_ids_ if needed
+    IF road_ids_ IS NULL THEN
+        EXECUTE '
+            UPDATE  '||road_table_||'
+            SET     intersection_from = ints.int_id
+            FROM    '||int_table_||' ints
+            WHERE   ints.geom = ST_StartPoint('||road_table_||'.geom)
+            AND     ints.z_elev = '||road_table_||'.z_from;
+            UPDATE  '||road_table_||'
+            SET     intersection_to = ints.int_id
+            FROM    '||int_table_||' ints
+            WHERE   ints.geom = ST_EndPoint('||road_table_||'.geom)
+            AND     ints.z_elev = '||road_table_||'.z_to;';
+    ELSE
+        EXECUTE '
+            UPDATE  '||road_table_||'
+            SET     intersection_from = ints.int_id
+            FROM    '||int_table_||' ints
+            WHERE   ints.geom = ST_StartPoint('||road_table_||'.geom)
+            AND     ints.z_elev = '||road_table_||'.z_from
+            AND     road_id = ANY ($1);
+            UPDATE  '||road_table_||'
+            SET     intersection_to = ints.int_id
+            FROM    '||int_table_||' ints
+            WHERE   ints.geom = ST_EndPoint('||road_table_||'.geom)
+            AND     ints.z_elev = '||road_table_||'.z_to
+            AND     road_id = ANY ($1);'
+        USING   road_ids_;
+    END IF;
+
+    RETURN 't';
+END $func$ LANGUAGE plpgsql;
+ALTER FUNCTION tdg.tdgSetRoadIntersections(REGCLASS,REGCLASS,INTEGER[]) OWNER TO gis;
 CREATE OR REPLACE FUNCTION tdgColumnCheck (input_table REGCLASS, column_name TEXT)
 RETURNS BOOLEAN AS $func$
 
@@ -1186,6 +1201,82 @@ BEGIN
 RETURN 't';
 END $func$ LANGUAGE plpgsql;
 ALTER FUNCTION tdg.tdgMakeNetwork(REGCLASS) OWNER TO gis;
+CREATE OR REPLACE FUNCTION tdg.tdgMakeIntersectionTable (road_table_ REGCLASS)
+RETURNS BOOLEAN AS $func$
+
+DECLARE
+    schema_name TEXT;
+    table_name TEXT;
+    int_table TEXT;
+    srid INT;
+
+BEGIN
+    -- set table name and schema
+    RAISE NOTICE 'Getting table details for %',road_table_;
+    EXECUTE '   SELECT  schema_name, table_name
+                FROM    tdgTableDetails($1::TEXT)'
+    USING   road_table_
+    INTO    schema_name, table_name;
+
+    int_table = schema_name || '.' || table_name || '_intersections';
+
+    -- get srid of the geom
+    RAISE NOTICE 'Getting SRID of geometry';
+    EXECUTE 'SELECT tdgGetSRID($1,$2);'
+    USING   road_table_,
+            'geom'
+    INTO    srid;
+
+    IF srid IS NULL THEN
+        RAISE EXCEPTION 'ERROR: Cannot determine the srid of the geometry in table %', table_name;
+    END IF;
+    raise NOTICE '  -----> SRID found %',srid;
+
+    -- create the intersection table
+    BEGIN
+        RAISE NOTICE 'Creating table %', int_table;
+        EXECUTE format('
+            CREATE TABLE %s (   int_id serial PRIMARY KEY,
+                                geom geometry(point,%L),
+                                z_elev INT NOT NULL DEFAULT 0,
+                                legs INT,
+                                signalized BOOLEAN);
+            ',  int_table,
+                srid);
+    END;
+
+    RETURN 't';
+
+END $func$ LANGUAGE plpgsql;
+ALTER FUNCTION tdg.tdgMakeIntersectionTable(REGCLASS) OWNER TO gis;
+CREATE OR REPLACE FUNCTION tdg.tdgMakeIntersectionIndexes (int_table_ REGCLASS)
+RETURNS BOOLEAN AS $func$
+
+DECLARE
+    table_name TEXT;
+
+BEGIN
+    --get base table name
+    EXECUTE 'SELECT table_name FROM tdgTableDetails($1);'
+    USING   int_table_::TEXT
+    INTO    table_name;
+
+    --intersection indices
+    RAISE NOTICE 'Creating indexes on %', int_table_;
+
+    EXECUTE '
+        CREATE INDEX sidx_'||table_name||'_geom
+            ON '||int_table_||' USING gist(geom);';
+    EXECUTE '
+        CREATE INDEX idx_'||table_name||'_z_elev
+            ON '||int_table_||' (z_elev);';
+
+    EXECUTE 'ANALYZE '||int_table_;
+
+    RETURN 't';
+
+END $func$ LANGUAGE plpgsql;
+ALTER FUNCTION tdg.tdgMakeIntersectionIndexes(REGCLASS) OWNER TO gis;
 CREATE OR REPLACE FUNCTION tdg.tdgShortestPathIntersections (   
     inttable_ REGCLASS,
     linktable_ REGCLASS,
@@ -1568,7 +1659,7 @@ DECLARE
 
 BEGIN
     EXECUTE 'SELECT table_name FROM tdgTableDetails($1);'
-    USING   road_table_
+    USING   road_table_::TEXT
     INTO    table_name;
 
     raise notice 'Creating indices on: %', road_table_;
@@ -1593,11 +1684,132 @@ BEGIN
             table_name,
             road_table_);
 
+    EXECUTE '
+        CREATE INDEX idx_'||table_name||'_intfrom ON '||road_table_||' (intersection_from);
+        CREATE INDEX idx_'||table_name||'_intto ON '||road_table_||' (intersection_to);';
+
     EXECUTE format('ANALYZE %s;',road_table_);
 
     RETURN 't';
 END $func$ LANGUAGE plpgsql;
 ALTER FUNCTION tdg.tdgMakeStandardizedRoadIndexes(REGCLASS) OWNER TO gis;
+CREATE OR REPLACE FUNCTION tdg.tdgInsertStandardizedRoad(
+    input_table_ REGCLASS,
+    road_table_ REGCLASS,
+    id_field_ TEXT,
+    name_field_ TEXT,
+    z_from_field_ TEXT,
+    z_to_field_ TEXT,
+    adt_field_ TEXT,
+    speed_field_ TEXT,
+    func_field_ TEXT,
+    oneway_field_ TEXT,
+    input_ids_ INTEGER[] DEFAULT NULL)
+RETURNS BOOLEAN AS $func$
+
+DECLARE
+    id_column TEXT;
+    table_name TEXT;
+    road_table TEXT;
+    querytext TEXT;
+    bad_one_way_id INT;
+BEGIN
+    -- get column name of primary key
+    EXECUTE '
+        SELECT a.attname
+        FROM   pg_index i
+        JOIN   pg_attribute a ON a.attrelid = i.indrelid
+                             AND a.attnum = ANY(i.indkey)
+        WHERE  i.indrelid = $1
+        AND    i.indisprimary;'
+    USING   input_table_
+    INTO    id_column;
+
+    --copy features over
+    BEGIN
+        RAISE NOTICE 'Copying features to %', road_table_;
+        --querytext := '';
+        querytext := '   INSERT INTO ' || road_table_ || ' (geom';
+        querytext := querytext || ',source_data';
+        IF name_field_ IS NOT NULL THEN
+            querytext := querytext || ',road_name';
+            END IF;
+        IF id_field_ IS NOT NULL THEN
+            querytext := querytext || ',source_id';
+            END IF;
+        IF func_field_ IS NOT NULL THEN
+            querytext := querytext || ',functional_class';
+            END IF;
+        IF oneway_field_ IS NOT NULL THEN
+            querytext := querytext || ',one_way';
+            END IF;
+        IF speed_field_ IS NOT NULL THEN
+            querytext := querytext || ',speed_limit';
+            END IF;
+        IF adt_field_ IS NOT NULL THEN
+            querytext := querytext || ',adt';
+            END IF;
+        IF z_from_field_ IS NOT NULL THEN
+            querytext := querytext || ',z_from';
+            END IF;
+        IF z_to_field_ IS NOT NULL THEN
+            querytext := querytext || ',z_to';
+            END IF;
+        querytext := querytext || ') SELECT ST_SnapToGrid(r.geom,2)';
+        querytext := querytext || ',' || quote_literal(input_table_);
+        IF name_field_ IS NOT NULL THEN
+            querytext := querytext || ',' || quote_ident(name_field_);
+            END IF;
+        IF id_field_ IS NOT NULL THEN
+            querytext := querytext || ',' || quote_ident(id_field_);
+            END IF;
+        IF func_field_ IS NOT NULL THEN
+            querytext := querytext || ',' || quote_ident(func_field_);
+            END IF;
+        IF oneway_field_ IS NOT NULL THEN
+            querytext := querytext || ',' || quote_ident(oneway_field_);
+            END IF;
+        IF speed_field_ IS NOT NULL THEN
+            querytext := querytext || ',' || quote_ident(speed_field_);
+            END IF;
+        IF adt_field_ IS NOT NULL THEN
+            querytext := querytext || ',' || quote_ident(adt_field_);
+            END IF;
+        IF z_from_field_ IS NOT NULL THEN
+            querytext := querytext || ',' || quote_ident(z_from_field_);
+            END IF;
+        IF z_to_field_ IS NOT NULL THEN
+            querytext := querytext || ',' || quote_ident(z_to_field_);
+            END IF;
+        querytext := querytext || ' FROM ' ||input_table_|| ' r ';
+
+        IF input_ids_ IS NULL THEN
+            EXECUTE querytext;
+        ELSE
+            EXECUTE querytext || '
+                WHERE r.'||id_column||' = ANY ('||quote_literal(input_ids_::TEXT)||')';
+        END IF;
+
+    EXCEPTION
+        WHEN check_violation THEN
+            EXECUTE '
+                SELECT  '||id_column||'
+                FROM    '||input_table_||'
+                WHERE   '||quote_ident(oneway_field_)||' IS NOT NULL
+                AND     '||quote_ident(oneway_field_)||' NOT IN ($1,$2)
+                LIMIT   1'
+            INTO    bad_one_way_id
+            USING   'ft',
+                    'tf';
+            RAISE EXCEPTION 'Bad one_way value on feature id %', bad_one_way_id
+            USING HINT = 'Value must be "ft" or "tf"';
+    END;
+
+    RETURN 't';
+END $func$ LANGUAGE plpgsql;
+ALTER FUNCTION tdg.tdgInsertStandardizedRoad(
+    REGCLASS,REGCLASS,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,
+    TEXT,TEXT,INTEGER[]) OWNER TO gis;
 CREATE OR REPLACE FUNCTION tdg.tdgGetSRID(input_table REGCLASS,geom_name TEXT)
 RETURNS INT AS $func$
 
