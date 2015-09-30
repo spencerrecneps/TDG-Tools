@@ -187,6 +187,7 @@ class StandardizeRoadLayer(GeoAlgorithm):
         dbUser = roadsDb.getUser()
         dbPass = roadsDb.getPassword()
         dbSchema = roadsDb.getSchema()
+        dbTable = roadsDb.getTable()
         dbType = roadsDb.getType()
         dbSRID = roadsDb.getSRID()
         try:
@@ -199,59 +200,93 @@ class StandardizeRoadLayer(GeoAlgorithm):
             raise GeoAlgorithmExecutionException(
                 self.tr("Couldn't connect to database:\n%s" % e.message))
 
-        sql = 'select tdg.tdgStandardizeRoadLayer('
-        sql = sql + "'" + roadsDb.getTable() + "',"
+        # first create the new road table
+        progress.setInfo('Creating standardized road layer')
+        sql = 'select tdg.tdgMakeStandardizedRoadLayer('
+        sql = sql + "'" + dbTable + "',"
         sql = sql + "'" + schema + "',"
         sql = sql + "'" + tableName + "',"
-        if fieldIdOrig is None:
-            sql = sql + 'NULL,'
-        else:
-            sql = sql + "'" + fieldIdOrig + "',"
-        if fieldName is None:
-            sql = sql + 'NULL,'
-        else:
-            sql = sql + "'" + fieldName + "',"
-        if fieldZFrom is None:
-            sql = sql + 'NULL,'
-        else:
-            sql = sql + "'" + fieldZFrom + "',"
-        if fieldZTo is None:
-            sql = sql + 'NULL,'
-        else:
-            sql = sql + "'" + fieldZTo + "',"
-        if fieldADT is None:
-            sql = sql + 'NULL,'
-        else:
-            sql = sql + "'" + fieldADT + "',"
-        if fieldSpeed is None:
-            sql = sql + 'NULL,'
-        else:
-            sql = sql + "'" + fieldSpeed + "',"
-        if fieldFunc is None:
-            sql = sql + 'NULL,'
-        else:
-            sql = sql + "'" + fieldFunc + "',"
-        if fieldOneway is None:
-            sql = sql + 'NULL,'
-        else:
-            sql = sql + "'" + fieldOneway + "',"
         if overwrite:
-            sql = sql + "'t',"
-        else:
-            sql = sql + "'f',"
-        if delSource:
             sql = sql + "'t')"
         else:
             sql = sql + "'f')"
-
-        # create the standardized road layer
-        progress.setInfo('Creating standardized road layer')
         try:
             db._exec_sql_and_commit(sql)
         except:
             raise
-        #processing.runalg("qgis:postgisexecutesql",dbName,sql)
-        progress.setPercentage(30)
+        progress.setPercentage(3)
+
+
+        # next copy data into the new road table
+        progress.setInfo('Copying features')
+
+        # first construct the base sql call
+        baseSql = 'select tdg.tdgInsertStandardizedRoadLayer('
+        baseSql = baseSql + "'" + dbTable + "',"
+        baseSql = baseSql + "'" + schema + '.' + tableName + "',"
+        if fieldIdOrig is None:
+            baseSql = baseSql + 'NULL,'
+        else:
+            baseSql = baseSql + "'" + fieldIdOrig + "',"
+        if fieldName is None:
+            baseSql = baseSql + 'NULL,'
+        else:
+            baseSql = baseSql + "'" + fieldName + "',"
+        if fieldZFrom is None:
+            baseSql = baseSql + 'NULL,'
+        else:
+            baseSql = baseSql + "'" + fieldZFrom + "',"
+        if fieldZTo is None:
+            baseSql = baseSql + 'NULL,'
+        else:
+            baseSql = baseSql + "'" + fieldZTo + "',"
+        if fieldADT is None:
+            baseSql = baseSql + 'NULL,'
+        else:
+            baseSql = baseSql + "'" + fieldADT + "',"
+        if fieldSpeed is None:
+            baseSql = baseSql + 'NULL,'
+        else:
+            baseSql = baseSql + "'" + fieldSpeed + "',"
+        if fieldFunc is None:
+            baseSql = baseSql + 'NULL,'
+        else:
+            baseSql = baseSql + "'" + fieldFunc + "',"
+        if fieldOneway is None:
+            baseSql = baseSql + 'NULL,'
+        else:
+            baseSql = baseSql + "'" + fieldOneway + "',"
+
+        # loop through either selected features (if any) or all features (if
+        # no selection) and process the cross streets in chunks of 100
+        featureIds = inLayer.selectedFeaturesIds()
+        if len(featureIds) == 0:
+            featureIds = inLayer.allFeatureIds()
+        progress.setInfo('Processing ' + str(len(featureIds)) + ' features')
+        chunks = [featureIds[i:i+100] for i in range(0, len(featureIds), 100)]
+        count = 100
+        for chunk in chunks:
+            sql = "'{"
+            for featId in chunk:
+                sql = sql + str(featId) + ','
+            sql = sql[:-1]                  #remove the last comma
+            sql = sql + "}'::INTEGER[])"    #finish the call
+            try:
+                db._exec_sql_and_commit(baseSql + sql)
+                progress.setPercentage(3+50*count/len(featureIds))
+                sql = "'{"
+                count = count + 100
+            except:
+                raise
+
+        # create the indexes
+        sql = 'select tdgMakeStandardizedRoadIndexes('
+        sql = sql + "'" + schema + '.' + tableName + "')"
+        try:
+            db._exec_sql_and_commit(sql)
+        except:
+            raise
+        progress.setPercentage(56)
 
         # create the intersections
         progress.setInfo('Generating intersection points')
