@@ -1,4 +1,4 @@
-CREATE OR REPLACE FUNCTION tdg.tdgInsertStandardizedRoadLayer(
+CREATE OR REPLACE FUNCTION tdg.tdgInsertStandardizedRoad(
     input_table_ REGCLASS,
     road_table_ REGCLASS,
     id_field_ TEXT,
@@ -29,12 +29,6 @@ BEGIN
         AND    i.indisprimary;'
     USING   input_table_
     INTO    id_column;
-
-    --compile list of int_ids_ if needed
-    IF input_ids_ IS NULL THEN
-        EXECUTE 'SELECT array_agg('||id_column||') FROM '||input_table_||';'
-        INTO    input_ids_;
-    END IF;
 
     --copy features over
     BEGIN
@@ -92,11 +86,14 @@ BEGIN
         IF z_to_field_ IS NOT NULL THEN
             querytext := querytext || ',' || quote_ident(z_to_field_);
             END IF;
-        querytext := querytext || ' FROM ' ||input_table_|| ' r';
-        querytext := querytext || '
-            WHERE r.'||id_column||' = ANY ('||quote_literal(input_ids_::TEXT)||')';
+        querytext := querytext || ' FROM ' ||input_table_|| ' r ';
 
-        EXECUTE querytext;
+        IF input_ids_ IS NULL THEN
+            EXECUTE querytext;
+        ELSE
+            EXECUTE querytext || '
+                WHERE r.'||id_column||' = ANY ('||quote_literal(input_ids_::TEXT)||')';
+        END IF;
 
     EXCEPTION
         WHEN check_violation THEN
@@ -115,6 +112,6 @@ BEGIN
 
     RETURN 't';
 END $func$ LANGUAGE plpgsql;
-ALTER FUNCTION tdg.tdgInsertStandardizedRoadLayer(
+ALTER FUNCTION tdg.tdgInsertStandardizedRoad(
     REGCLASS,REGCLASS,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,
     TEXT,TEXT,INTEGER[]) OWNER TO gis;

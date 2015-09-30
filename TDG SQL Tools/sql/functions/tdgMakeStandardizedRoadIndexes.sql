@@ -31,6 +31,10 @@ BEGIN
             table_name,
             road_table_);
 
+    EXECUTE '
+        CREATE INDEX idx_'||table_name||'_intfrom ON '||road_table_||' (intersection_from);
+        CREATE INDEX idx_'||table_name||'_intto ON '||road_table_||' (intersection_to);';
+
     EXECUTE format('ANALYZE %s;',road_table_);
 
     RETURN 't';

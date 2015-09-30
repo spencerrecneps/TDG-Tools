@@ -221,7 +221,7 @@ class StandardizeRoadLayer(GeoAlgorithm):
         progress.setInfo('Copying features')
 
         # first construct the base sql call
-        baseSql = 'select tdg.tdgInsertStandardizedRoadLayer('
+        baseSql = 'select tdg.tdgInsertStandardizedRoad('
         baseSql = baseSql + "'" + dbTable + "',"
         baseSql = baseSql + "'" + schema + '.' + tableName + "',"
         if fieldIdOrig is None:
@@ -258,13 +258,13 @@ class StandardizeRoadLayer(GeoAlgorithm):
             baseSql = baseSql + "'" + fieldOneway + "',"
 
         # loop through either selected features (if any) or all features (if
-        # no selection) and process the cross streets in chunks of 100
+        # no selection) and process the cross streets in chunks of 1000
         featureIds = inLayer.selectedFeaturesIds()
         if len(featureIds) == 0:
             featureIds = inLayer.allFeatureIds()
         progress.setInfo('Processing ' + str(len(featureIds)) + ' features')
-        chunks = [featureIds[i:i+100] for i in range(0, len(featureIds), 100)]
-        count = 100
+        chunks = [featureIds[i:i+1000] for i in range(0, len(featureIds), 1000)]
+        count = 1000
         for chunk in chunks:
             sql = "'{"
             for featId in chunk:
@@ -272,10 +272,10 @@ class StandardizeRoadLayer(GeoAlgorithm):
             sql = sql[:-1]                  #remove the last comma
             sql = sql + "}'::INTEGER[])"    #finish the call
             try:
-                db._exec_sql(baseSql + sql)
-                progress.setPercentage(3+50*count/len(featureIds))
+                db._exec_sql_and_commit(baseSql + sql)
+                progress.setPercentage(3+20*count/len(featureIds))
                 sql = "'{"
-                count = count + 100
+                count = count + 1000
             except:
                 raise
 
@@ -286,56 +286,127 @@ class StandardizeRoadLayer(GeoAlgorithm):
             db._exec_sql_and_commit(sql)
         except:
             raise
-        progress.setPercentage(56)
+        progress.setPercentage(26)
 
-        # create the intersections
-        progress.setInfo('Generating intersection points')
-        zval = 't'
-        if (fieldZTo is None or fieldZFrom is None):
-            zval = 'f'
-        sql = "select tdgMakeIntersections('%s','%s');" % (schema+'.'+tableName, zval)
+        # create the roads layer
+        progress.setInfo('Creating road layer')
+        uri = QgsDataSourceURI()
+        uri.setConnection(dbHost,str(dbPort),dbName,dbUser,dbPass)
+        uri.setDataSource(schema,tableName,'geom','','road_id')
+        uri.setSrid(str(dbSRID))
+        uri.setWkbType(QGis.WKBLineString)
+        roadLayer = QgsVectorLayer(uri.uri(),tableName,'postgres')
+
+        # create the intersection table
+        progress.setInfo('Creating intersection table')
+        sql = 'select tdgMakeIntersectionTable('
+        sql = sql + "'" + schema + '.' + tableName + "')"
         try:
             db._exec_sql_and_commit(sql)
         except:
             raise
-        #processing.runalg("qgis:postgisexecutesql",dbName,sql)
-        progress.setPercentage(70)
+        progress.setPercentage(28)
 
-        '''
-        progress.setInfo('Updating cross street info')
-        sql = 'select tdgGenerateCrossStreetData('
-        sql = sql + "'" + tableName + "');"
-        processing.runalg("qgis:postgisexecutesql",dbName,
-            sql)
-        '''
-        mapReg = QgsMapLayerRegistry.instance()
-        if delSource:
+        # add intersections to the intersection table
+        progress.setInfo('Adding intersections')
+        sql = 'select tdgInsertIntersections('
+        sql = sql + "'" + schema + '.' + tableName + "_intersections',"
+        sql = sql + "'" + schema + '.' + tableName + "')"
+        try:
+            db._exec_sql_and_commit(sql)
+        except:
+            raise
+        progress.setPercentage(40)
+
+        # create indexes on intersections table
+        progress.setInfo('Adding indexes')
+        sql = 'select tdgMakeIntersectionIndexes('
+        sql = sql + "'" + schema + '.' + tableName + "_intersections')"
+        try:
+            db._exec_sql_and_commit(sql)
+        except:
+            raise
+        progress.setPercentage(43)
+
+        # create intersection layer
+        progress.setInfo('Creating intersection layer')
+        intTableName = tableName + '_intersections'
+        uri.setConnection(dbHost,str(dbPort),dbName,dbUser,dbPass)
+        uri.setDataSource(schema,intTableName,'geom','','int_id')
+        uri.setWkbType(QGis.WKBPoint)
+        intLayer = QgsVectorLayer(uri.uri(),intTableName,'postgres')
+
+        # loop through road features and process their intersection info
+        # in chunks of 1000
+        progress.setInfo('Adding intersection data to roads')
+        featureIds = roadLayer.allFeatureIds()
+        progress.setInfo('  Processing ' + str(len(featureIds)) + ' road features')
+        baseSql = 'select tdgSetRoadIntersections('
+        baseSql = baseSql + "'" + schema + '.' + tableName + "_intersections',"
+        baseSql = baseSql + "'" + schema + '.' + tableName + "',"
+        chunks = [featureIds[i:i+1000] for i in range(0, len(featureIds), 1000)]
+        count = 1000
+        for chunk in chunks:
+            sql = "'{"
+            for featId in chunk:
+                sql = sql + str(featId) + ','
+            sql = sql[:-1]                  #remove the last comma
+            sql = sql + "}'::INTEGER[])"    #finish the call
             try:
-                mapReg.removeMapLayer(inLayer.id())
-            except:
-                pass
-            delSql = 'DROP TABLE ' + roadsDb.getTable()
-            try:
-                db._exec_sql_and_commit(delSql)
+                db._exec_sql_and_commit(baseSql + sql)
+                progress.setPercentage(43+48*count/len(featureIds))
+                sql = "'{"
+                count = count + 1000
             except:
                 raise
-            #processing.runalg("qgis:postgisexecutesql",dbName,delSql)
+
+        # loop through intersection features and set the count of legs
+        progress.setInfo('Calculating intersection legs')
+        featureIds = intLayer.allFeatureIds()
+        progress.setInfo('  Processing ' + str(len(featureIds)) + ' intersection features')
+        baseSql = 'select tdgSetIntersectionLegs('
+        baseSql = baseSql + "'" + schema + '.' + tableName + "_intersections',"
+        baseSql = baseSql + "'" + schema + '.' + tableName + "',"
+        chunks = [featureIds[i:i+1000] for i in range(0, len(featureIds), 1000)]
+        count = 1000
+        for chunk in chunks:
+            sql = "'{"
+            for featId in chunk:
+                sql = sql + str(featId) + ','
+            sql = sql[:-1]                  #remove the last comma
+            sql = sql + "}'::INTEGER[])"    #finish the call
+            try:
+                db._exec_sql_and_commit(baseSql + sql)
+                progress.setPercentage(91+7*count/len(featureIds))
+                sql = "'{"
+                count = count + 1000
+            except:
+                raise
+
+        # set intersection triggers
+        progress.setInfo('Adding intersection triggers')
+        sql = 'select tdgMakeIntersectionTriggers('
+        sql = sql + "'" + schema + '.' + tableName + "_intersections',"
+        sql = sql + "'" + tableName + "')"
+        try:
+            db._exec_sql_and_commit(sql)
+        except:
+            raise
+        progress.setPercentage(99)
+
+        # set road triggers
+        progress.setInfo('Adding road triggers')
+        sql = 'select tdgMakeRoadTriggers('
+        sql = sql + "'" + schema + '.' + tableName + "',"
+        sql = sql + "'" + tableName + "')"
+        try:
+            db._exec_sql_and_commit(sql)
+        except:
+            raise
+        progress.setPercentage(100)
 
         # add layers to map
+        mapReg = QgsMapLayerRegistry.instance()
         if addToMap:
-            # add roads layer
-            uri = QgsDataSourceURI()
-            uri.setConnection(dbHost,str(dbPort),dbName,dbUser,dbPass)
-            uri.setDataSource(schema,tableName,'geom','','id')
-            uri.setSrid(str(dbSRID))
-            uri.setWkbType(QGis.WKBLineString)
-            layer = QgsVectorLayer(uri.uri(),tableName,'postgres')
-            mapReg.addMapLayer(layer)
-
-            # add the intersections layer
-            tableName = tableName + '_intersections'
-            uri.setConnection(dbHost,str(dbPort),dbName,dbUser,dbPass)
-            uri.setDataSource(schema,tableName,'geom','','id')
-            uri.setWkbType(QGis.WKBPoint)
-            layer = QgsVectorLayer(uri.uri(),tableName,'postgres')
-            mapReg.addMapLayer(layer)
+            mapReg.addMapLayer(roadLayer)
+            mapReg.addMapLayer(intLayer)
