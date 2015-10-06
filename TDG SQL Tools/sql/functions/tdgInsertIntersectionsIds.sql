@@ -8,6 +8,7 @@ BEGIN
     RAISE NOTICE 'Inserting intersections into %', int_table_;
 
     -- create staging table
+    DROP TABLE IF EXISTS tmp_ints;
     EXECUTE '
         CREATE TEMPORARY TABLE tmp_ints (
             geom geometry(point),
@@ -23,16 +24,24 @@ BEGIN
         INSERT INTO tmp_ints (geom, z_elev)
         SELECT  ST_EndPoint(road_t.geom), road_t.z_to
         FROM    '||road_table_||' road_t
-        WHERE   road_t.road_id = ANY ($1);';
+        WHERE   road_t.road_id = ANY ($1);'
+    USING   road_ids;
+
+    -- indexes
+    EXECUTE '
+        CREATE INDEX sidx_tmp_ints_geom ON tmp_ints USING GIST (geom);
+        CREATE INDEX idx_tmp_ints_z_elev ON tmp_ints (z_elev);
+        ANALYZE tmp_ints;';
 
     -- move to intersection table
     EXECUTE '
         INSERT INTO '||int_table_||' (geom, z_elev)
         SELECT DISTINCT geom, z_elev
+        FROM tmp_ints
         WHERE NOT EXISTS (  SELECT  1
                             FROM    '||int_table_||' i
-                            WHERE   '||int_table_||'.geom = i.geom
-                            and     '||int_table_||'.z_elev = i.z_elev)';
+                            WHERE   tmp_ints.geom = i.geom
+                            AND     tmp_ints.z_elev = i.z_elev)';
 
     RETURN 't';
 END $func$ LANGUAGE plpgsql;

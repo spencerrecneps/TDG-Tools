@@ -11,13 +11,7 @@ AS $BODY$
 
 BEGIN
     EXECUTE '
-        CREATE TEMPORARY TABLE tmp_roadgeomchange (
-            road_id INTEGER,
-            old_int_from INTEGER,
-            new_int_from INTEGER,
-            old_int_to INTEGER,
-            new_int_to INTEGER
-        )
+        CREATE TEMPORARY TABLE tmp_roadgeomchange (road_id INTEGER)
         ON COMMIT DROP;';
 
     RETURN NULL;

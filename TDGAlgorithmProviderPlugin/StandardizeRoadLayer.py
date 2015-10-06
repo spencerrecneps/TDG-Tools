@@ -211,7 +211,7 @@ class StandardizeRoadLayer(GeoAlgorithm):
         else:
             sql = sql + "'f')"
         try:
-            db._exec_sql(sql)
+            db._exec_sql_and_commit(sql)
         except:
             raise
         progress.setPercentage(3)
