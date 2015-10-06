@@ -1,5 +1,5 @@
 directory = 'extension'
-default_version = '0.2'
+default_version = '0.1'
 comment = 'SQL tools for TDG analyses'
 requires = 'postgis,uuid-ossp'
 superuser = true
