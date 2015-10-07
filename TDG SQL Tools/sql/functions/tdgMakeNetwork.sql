@@ -64,6 +64,7 @@ BEGIN
                 vert_id serial PRIMARY KEY,
                 int_id INT,
                 road_id INT,
+                vert_cost INT,
                 geom geometry(point,'||srid::TEXT||'));';
 
         RAISE NOTICE 'creating turn restrictions table';
@@ -189,7 +190,7 @@ BEGIN
                 AND vert1.int_id = vert2.int_id
         WHERE   vert1.road_id IS NOT NULL
         AND     vert2.road_id IS NOT NULL;';
-    
+
 
     --set turn information intersection by intersections
     -- BEGIN

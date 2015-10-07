@@ -1,4 +1,4 @@
-CREATE OR REPLACE FUNCTION tdg.tdgShortestPathIntersections (   
+CREATE OR REPLACE FUNCTION tdg.tdgShortestPathIntersections (
     inttable_ REGCLASS,
     linktable_ REGCLASS,
     verttable_ REGCLASS,
@@ -20,42 +20,35 @@ BEGIN
     --check intersections for existence
     RAISE NOTICE 'Checking intersections';
 
-    EXECUTE 'SELECT EXISTS (SELECT 1 FROM '|| inttable_ || ' WHERE id IN ($1,$2));'
+    EXECUTE 'SELECT EXISTS (SELECT 1 FROM '|| inttable_ || ' WHERE int_id = $1);'
     INTO    vertcheck
-    USING   from_,
-            to_;
+    USING   from_;
 
     IF NOT vertcheck THEN
-        EXECUTE 'SELECT EXISTS (SELECT 1 FROM '|| inttable_ || ' WHERE id = $1);'
-        INTO    vertcheck
-        USING   from_;
+        RAISE EXCEPTION 'Nonexistent intersection --> %', from_::TEXT
+        USING HINT = 'Please check your intersections';
+    END IF;
 
-        IF NOT vertcheck THEN
-            RAISE EXCEPTION 'Nonexistent intersection --> %', from_::TEXT
-            USING HINT = 'Please check your intersections';
-        END IF;
+    EXECUTE 'SELECT EXISTS (SELECT 1 FROM '|| inttable_ || ' WHERE int_id = $1);'
+    INTO    vertcheck
+    USING   to_;
 
-        EXECUTE 'SELECT EXISTS (SELECT 1 FROM '|| inttable_ || ' WHERE id = $1);'
-        INTO    vertcheck
-        USING   to_;
-
-        IF NOT vertcheck THEN
-            RAISE EXCEPTION 'Nonexistent intersection --> %', to_::TEXT
-            USING HINT = 'Please check your intersections';
-        END IF;
+    IF NOT vertcheck THEN
+        RAISE EXCEPTION 'Nonexistent intersection --> %', to_::TEXT
+        USING HINT = 'Please check your intersections';
     END IF;
 
     RAISE NOTICE 'Testing shortest paths';
     --do shortest path starting at first vertex to other vertices
     --then do another and compare SUM(move_cost) to first. Keep lowest.
     FOR fromtestvert IN
-    EXECUTE '   SELECT  node_id
+    EXECUTE '   SELECT  vert_id
                 FROM ' || verttable_ || '
                 WHERE   intersection_id = $1;'
     USING   from_
     LOOP
         FOR totestvert IN
-        EXECUTE '   SELECT  node_id
+        EXECUTE '   SELECT  vert_id
                     FROM ' || verttable_ || '
                     WHERE   intersection_id = $1;'
         USING   to_

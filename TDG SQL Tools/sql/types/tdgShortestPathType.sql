@@ -1,4 +1,6 @@
-CREATE TYPE tdgShortestPathType AS (
+CREATE TYPE tdg.tdgShortestPathType AS (
+    from_vert INT,
+    to_vert INT,
     move_sequence INT,
     link_id INT,
     vert_id INT,

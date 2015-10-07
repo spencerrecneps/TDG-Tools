@@ -22,7 +22,9 @@ GRANT ALL ON SCHEMA tdg TO PUBLIC;
 CREATE SCHEMA IF NOT EXISTS generated AUTHORIZATION gis;
 CREATE SCHEMA IF NOT EXISTS received AUTHORIZATION gis;
 CREATE SCHEMA IF NOT EXISTS scratch AUTHORIZATION gis;
-CREATE TYPE tdgShortestPathType AS (
+CREATE TYPE tdg.tdgShortestPathType AS (
+    from_vert INT,
+    to_vert INT,
     move_sequence INT,
     link_id INT,
     vert_id INT,
@@ -759,18 +761,17 @@ END $func$ LANGUAGE plpgsql;
 ALTER FUNCTION tdg.tdgMultiToSingle(REGCLASS,TEXT,TEXT,INTEGER,BOOLEAN) OWNER TO gis;
 CREATE OR REPLACE FUNCTION tdgShortestPathVerts (   linktable_ REGCLASS,
                                                     verttable_ REGCLASS,
-                                                    from_ INT,
-                                                    to_ INT,
-                                                    stress_ INT DEFAULT NULL)
+                                                    from_to_pairs_ INTEGER[],
+                                                    stress_ INTEGER DEFAULT NULL)
 RETURNS SETOF tdgShortestPathType AS $$
 
 import networkx as nx
 
-# check node existence
-qc = plpy.execute('SELECT EXISTS (SELECT 1 FROM %s WHERE node_id = %s)' % (verttable_,from_))
+# check vert existence
+qc = plpy.execute('SELECT EXISTS (SELECT 1 FROM %s WHERE vert_id = %s)' % (verttable_,from_))
 if not qc[0]['exists']:
     plpy.error('From vertex does not exist.')
-qc = plpy.execute('SELECT EXISTS (SELECT 1 FROM %s WHERE node_id = %s)' % (verttable_,to_))
+qc = plpy.execute('SELECT EXISTS (SELECT 1 FROM %s WHERE vert_id = %s)' % (verttable_,to_))
 if not qc[0]['exists']:
     plpy.error('To vertex does not exist.')
 
@@ -785,8 +786,8 @@ if not stress_ is None:
 # edges first
 edges = plpy.execute('SELECT * FROM %s;' % linktable_)
 for e in edges:
-    DG.add_edge(e['source_node'],
-                e['target_node'],
+    DG.add_edge(e['source_vert'],
+                e['target_vert'],
                 weight=max(e['link_cost'],0),
                 link_id=e['id'],
                 stress=min(e['link_stress'],99),
@@ -795,18 +796,52 @@ for e in edges:
 # then vertices
 verts = plpy.execute('SELECT * FROM %s;' % verttable_)
 for v in verts:
-    vid = v['node_id']
-    DG.node[vid]['weight'] = max(v['node_cost'],0)
+    vid = v['vert_id']
+    DG.node[vid]['weight'] = max(v['vert_cost'],0)
     DG.node[vid]['intersection_id'] = v['intersection_id']
 
 
 # get the shortest path
-plpy.info('Checking for path existence')
-if nx.has_path(DG,source=from_,target=to_):
-    plpy.info('Path found')
-    shortestPath = nx.shortest_path(DG,source=from_,target=to_,weight='weight')
-else:
-    plpy.error('No path between given vertices')
+ret = []
+for pair in from_to_pairs_:
+    for from_vert, to_vert in pair:
+        seq = 0
+        plpy.info('Checking for path existence')
+        if nx.has_path(DG,source=from_vert,target=to_vert):
+            plpy.info('Path found')
+            shortestPath = nx.shortest_path(DG,source=from_vert,target=to_vert,weight='weight')
+            for v1 in shortestPath:
+                seq = seq + 1
+                v2 = getNextNode(shortestPath,v1)
+                if v2:
+                    ret.append((from_vert,
+                                to_vert,
+                                seq,
+                                None,
+                                v1,
+                                None,
+                                DG.node[v1]['intersection_id'],
+                                DG.node[v1]['weight']))
+                    seq = seq + 1
+                    ret.append((from_vert,
+                                to_vert,
+                                seq,
+                                DG.edge[v1][v2]['link_id'],
+                                None,
+                                DG.edge[v1][v2]['road_id'],
+                                None,
+                                DG.edge[v1][v2]['weight']))
+                else:
+                    ret.append((from_vert,
+                                to_vert,
+                                seq,
+                                None,
+                                v1,
+                                None,
+                                DG.node[v1]['intersection_id'],
+                                DG.node[v1]['weight']))
+        else:
+            plpy.error('No path between given vertices')
 
 
 # set up function to return edges
@@ -817,39 +852,10 @@ def getNextNode(nodes,node):
     except:
         return None
 
-
-# build the return values
-ret = []
-seq = 0
-for v1 in shortestPath:
-    seq = seq + 1
-    v2 = getNextNode(shortestPath,v1)
-    if v2:
-        ret.append((seq,
-                    None,
-                    v1,
-                    None,
-                    DG.node[v1]['intersection_id'],
-                    DG.node[v1]['weight']))
-        seq = seq + 1
-        ret.append((seq,
-                    DG.edge[v1][v2]['link_id'],
-                    None,
-                    DG.edge[v1][v2]['road_id'],
-                    None,
-                    DG.edge[v1][v2]['weight']))
-    else:
-        ret.append((seq,
-                    None,
-                    v1,
-                    None,
-                    DG.node[v1]['intersection_id'],
-                    DG.node[v1]['weight']))
-
 return ret
 
 $$ LANGUAGE plpythonu;
-ALTER FUNCTION tdgShortestPathVerts(REGCLASS,REGCLASS,INT,INT,INT) OWNER TO gis;
+ALTER FUNCTION tdgShortestPathVerts(REGCLASS,REGCLASS,INTEGER[],INTEGER) OWNER TO gis;
 CREATE OR REPLACE FUNCTION tdg.tdgInsertIntersections(
     int_table_ REGCLASS,
     road_table_ REGCLASS,
@@ -1057,6 +1063,7 @@ BEGIN
                 vert_id serial PRIMARY KEY,
                 int_id INT,
                 road_id INT,
+                vert_cost INT,
                 geom geometry(point,'||srid::TEXT||'));';
 
         RAISE NOTICE 'creating turn restrictions table';
@@ -1182,7 +1189,7 @@ BEGIN
                 AND vert1.int_id = vert2.int_id
         WHERE   vert1.road_id IS NOT NULL
         AND     vert2.road_id IS NOT NULL;';
-    
+
 
     --set turn information intersection by intersections
     -- BEGIN
@@ -1286,7 +1293,7 @@ BEGIN
 
 END $func$ LANGUAGE plpgsql;
 ALTER FUNCTION tdg.tdgMakeIntersectionIndexes(REGCLASS) OWNER TO gis;
-CREATE OR REPLACE FUNCTION tdg.tdgShortestPathIntersections (   
+CREATE OR REPLACE FUNCTION tdg.tdgShortestPathIntersections (
     inttable_ REGCLASS,
     linktable_ REGCLASS,
     verttable_ REGCLASS,
@@ -1308,42 +1315,35 @@ BEGIN
     --check intersections for existence
     RAISE NOTICE 'Checking intersections';
 
-    EXECUTE 'SELECT EXISTS (SELECT 1 FROM '|| inttable_ || ' WHERE id IN ($1,$2));'
+    EXECUTE 'SELECT EXISTS (SELECT 1 FROM '|| inttable_ || ' WHERE int_id = $1);'
     INTO    vertcheck
-    USING   from_,
-            to_;
+    USING   from_;
 
     IF NOT vertcheck THEN
-        EXECUTE 'SELECT EXISTS (SELECT 1 FROM '|| inttable_ || ' WHERE id = $1);'
-        INTO    vertcheck
-        USING   from_;
+        RAISE EXCEPTION 'Nonexistent intersection --> %', from_::TEXT
+        USING HINT = 'Please check your intersections';
+    END IF;
 
-        IF NOT vertcheck THEN
-            RAISE EXCEPTION 'Nonexistent intersection --> %', from_::TEXT
-            USING HINT = 'Please check your intersections';
-        END IF;
+    EXECUTE 'SELECT EXISTS (SELECT 1 FROM '|| inttable_ || ' WHERE int_id = $1);'
+    INTO    vertcheck
+    USING   to_;
 
-        EXECUTE 'SELECT EXISTS (SELECT 1 FROM '|| inttable_ || ' WHERE id = $1);'
-        INTO    vertcheck
-        USING   to_;
-
-        IF NOT vertcheck THEN
-            RAISE EXCEPTION 'Nonexistent intersection --> %', to_::TEXT
-            USING HINT = 'Please check your intersections';
-        END IF;
+    IF NOT vertcheck THEN
+        RAISE EXCEPTION 'Nonexistent intersection --> %', to_::TEXT
+        USING HINT = 'Please check your intersections';
     END IF;
 
     RAISE NOTICE 'Testing shortest paths';
     --do shortest path starting at first vertex to other vertices
     --then do another and compare SUM(move_cost) to first. Keep lowest.
     FOR fromtestvert IN
-    EXECUTE '   SELECT  node_id
+    EXECUTE '   SELECT  vert_id
                 FROM ' || verttable_ || '
                 WHERE   intersection_id = $1;'
     USING   from_
     LOOP
         FOR totestvert IN
-        EXECUTE '   SELECT  node_id
+        EXECUTE '   SELECT  vert_id
                     FROM ' || verttable_ || '
                     WHERE   intersection_id = $1;'
         USING   to_
