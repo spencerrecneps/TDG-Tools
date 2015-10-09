@@ -1,83 +1,107 @@
 CREATE OR REPLACE FUNCTION tdg.tdgShortestPathIntersections (
-    inttable_ REGCLASS,
-    linktable_ REGCLASS,
-    verttable_ REGCLASS,
-    from_ INT,
-    to_ INT,
-    stress_ INT DEFAULT NULL)
-RETURNS SETOF tdgShortestPathType AS $func$
+    int_table_ REGCLASS,
+    link_table_ REGCLASS,
+    vert_table_ REGCLASS,
+    from_to_pairs_ INTEGER[],
+    stress_ INTEGER DEFAULT NULL)
+RETURNS SETOF tdg.tdgShortestPathType AS $$
 
-DECLARE
-    vertcheck BOOLEAN;
-    fromtestvert INT;
-    totestvert INT;
-    minfromvert INT;
-    mintovert INT;
-    mincost INT;
-    comparecost INT;
+import itertools
 
-BEGIN
-    --check intersections for existence
-    RAISE NOTICE 'Checking intersections';
+# switch to pythonic variable names
+intTable = int_table_
+linkTable = link_table_
+vertTable = vert_table_
+fromToPairs = from_to_pairs_
 
-    EXECUTE 'SELECT EXISTS (SELECT 1 FROM '|| inttable_ || ' WHERE int_id = $1);'
-    INTO    vertcheck
-    USING   from_;
+# check the intersections to make sure there isn't an unpaired number
+if not len(fromToPairs)%2 == 0:
+    plpy.error('Unpaired intersection given')
 
-    IF NOT vertcheck THEN
-        RAISE EXCEPTION 'Nonexistent intersection --> %', from_::TEXT
-        USING HINT = 'Please check your intersections';
-    END IF;
+# split fromToPairs into pairs
+intPairs = zip(fromToPairs[::2], fromToPairs[1::2])
 
-    EXECUTE 'SELECT EXISTS (SELECT 1 FROM '|| inttable_ || ' WHERE int_id = $1);'
-    INTO    vertcheck
-    USING   to_;
+# check intersection's existence
+plpy.info('Checking intersections')
+for pair in intPairs:
+    for i in pair:
+        qc = plpy.execute('SELECT EXISTS (SELECT 1 FROM %s WHERE int_id = %s)' % (intTable,i))
+        if not qc[0]['exists']:
+            plpy.error('Intersection ' + str(i) + ' does not exist.')
 
-    IF NOT vertcheck THEN
-        RAISE EXCEPTION 'Nonexistent intersection --> %', to_::TEXT
-        USING HINT = 'Please check your intersections';
-    END IF;
+# routine to get min cost from a list of pairIds
+def minCostPair(table, pairIds):
+    minPair = -1
+    for pairId in pairIds:
+        cost = 0
+        for row in table:
+            if row['pair_id'] == pairId:
+                cost = cost + row['move_cost']
+        if minPair > 0:
+            if cost < minPair:
+                minPair = pairId
+        else:
+            minPair = pairId
+    return minPair
 
-    RAISE NOTICE 'Testing shortest paths';
-    --do shortest path starting at first vertex to other vertices
-    --then do another and compare SUM(move_cost) to first. Keep lowest.
-    FOR fromtestvert IN
-    EXECUTE '   SELECT  vert_id
-                FROM ' || verttable_ || '
-                WHERE   intersection_id = $1;'
-    USING   from_
-    LOOP
-        FOR totestvert IN
-        EXECUTE '   SELECT  vert_id
-                    FROM ' || verttable_ || '
-                    WHERE   intersection_id = $1;'
-        USING   to_
-        LOOP
-            EXECUTE '   SELECT SUM(move_cost)
-                        FROM    tdgShortestPathVerts($1,$2,$3,$4,$5);'
-            USING   linktable_,
-                    verttable_,
-                    fromtestvert,
-                    totestvert,
-                    stress_
-            INTO    comparecost;
+# routine to return pairs that correspond to the first intersection
+def getPairsFromMin(table, intId):
+    pairs = []
+    for row in table:
+        if row['move_sequence'] == 1 and row['int_id'] == intId:
+            pairs.append(row['pair_id'])
+    return pairs
 
-            IF mincost IS NULL OR comparecost < mincost THEN
-                mincost := comparecost;
-                minfromvert := fromtestvert;
-                mintovert := totestvert;
-            END IF;
-        END LOOP;
-    END LOOP;
+# routine to return pairs that correspond to the last intersection
+def getPairsFromMax(table, intId):
+    pairs = []
+    maxs = dict()
+    for row in table:
+        if row['pair_id'] in maxs:
+            if maxs[row['pair_id']]['move_sequence'] < row['move_sequence']:
+                maxs[row['pair_id']] = row
+        else:
+            maxs[row['pair_id']] = row
+    plpy.info(str(maxs))
+    for k, row in maxs.iteritems():
+        if row['int_id'] == intId:
+            pairs.append(row['pair_id'])
+    return pairs
 
-RETURN QUERY
-EXECUTE '   SELECT  *
-            FROM    tdgShortestPathVerts($1,$2,$3,$4,$5);'
-USING   linktable_,
-        verttable_,
-        minfromvert,
-        mintovert,
-        stress_;
---followed by empty RETURN???
-END $func$ LANGUAGE plpgsql;
-ALTER FUNCTION tdg.tdgShortestPathIntersections(REGCLASS,REGCLASS,REGCLASS,INT,INT,INT) OWNER TO gis;
+# get the verts
+plpy.info('Getting vertices')
+verts = []
+for fromInt, toInt in intPairs:
+    fromVerts = plpy.execute('SELECT vert_id FROM %s WHERE int_id = %s' % (vertTable,fromInt))
+    toVerts = plpy.execute('SELECT vert_id FROM %s WHERE int_id = %s' % (vertTable,toInt))
+
+    for f, t in itertools.product(fromVerts,toVerts):
+        verts.append(f['vert_id'])
+        verts.append(t['vert_id'])
+
+# get all possible shortest paths
+plpy.info('Getting candidate paths')
+sql = plpy.prepare(
+    'SELECT * FROM tdg.tdgShortestPathVerts($1,$2,$3,$4)',
+    ["text","text","integer[]","integer"]
+)
+paths = plpy.execute(
+    sql,
+    [linkTable, vertTable, verts, stress_]
+)
+
+# parse through returned table and get shortest path for each
+ret = []
+for fromInt, toInt in intPairs:
+    pairIds = list(
+        set( getPairsFromMin(paths, fromInt) ) & set( getPairsFromMax(paths, toInt) )
+    )
+    minPair = minCostPair(paths, pairIds)
+    for row in paths:
+        if row['pair_id'] == minPair:
+            ret.append(row)
+
+return ret
+
+$$ LANGUAGE plpythonu;
+ALTER FUNCTION tdg.tdgShortestPathIntersections(REGCLASS,REGCLASS,REGCLASS,INTEGER[],INTEGER) OWNER TO gis;
