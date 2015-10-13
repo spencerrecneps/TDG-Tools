@@ -1,0 +1,235 @@
+CREATE OR REPLACE FUNCTION tdg.tdgShortestPathIntersections (
+    road_table_ REGCLASS,
+    int_table_ REGCLASS,
+    link_table_ REGCLASS,
+    vert_table_ REGCLASS,
+    from_to_pairs_ INTEGER[],
+    stress_ INTEGER DEFAULT NULL)
+RETURNS SETOF tdg.tdgShortestPathType AS $$
+
+from collections import Counter
+
+# switch to pythonic variable names
+roadTable = road_table_
+intTable = int_table_
+linkTable = link_table_
+vertTable = vert_table_
+fromToPairs = from_to_pairs_
+
+# check the intersections to make sure there isn't an unpaired number
+if not len(fromToPairs)%2 == 0:
+    plpy.error('Unpaired intersection given')
+
+# split fromToPairs into pairs
+intPairs = zip(fromToPairs[::2], fromToPairs[1::2])
+
+# check intersection's existence
+plpy.info('Checking intersections')
+for pair in intPairs:
+    for i in pair:
+        qc = plpy.execute('SELECT EXISTS (SELECT 1 FROM %s WHERE int_id = %s)' % (intTable,i))
+        if not qc[0]['exists']:
+            plpy.error('Intersection ' + str(i) + ' does not exist.')
+
+# routine to get min cost from a list of pairIds
+def minCostPair(table, pairIds):
+    minPair = -1
+    for pairId in pairIds:
+        cost = 0
+        for row in table:
+            if row['path_id'] == pairId:
+                cost = cost + row['move_cost']
+        if minPair > 0:
+            if cost < minPair:
+                minPair = pairId
+        else:
+            minPair = pairId
+    return minPair
+
+# routine to return pairs that correspond to the first intersection
+def getPairsFromMin(table, intId):
+    pairs = []
+    for row in table:
+        if row['move_sequence'] == 1 and row['int_id'] == intId:
+            pairs.append(row['path_id'])
+    return pairs
+
+# routine to return pairs that correspond to the last intersection
+def getPairsFromMax(table, intId):
+    pairs = []
+    maxs = dict()
+    for row in table:
+        if row['path_id'] in maxs:
+            if maxs[row['path_id']]['move_sequence'] < row['move_sequence']:
+                maxs[row['path_id']] = row
+        else:
+            maxs[row['path_id']] = row
+    for k, row in maxs.iteritems():
+        if row['int_id'] == intId:
+            pairs.append(row['path_id'])
+    return pairs
+
+# temp table to hold the verts that need to be tried
+# if the intersection has any one-way streets then we
+# need to try them specifically for shortest path.
+# if not, we can just try a single vertex from the
+# intersection.
+
+# first add only one vertex for two-way roads at
+# each intersection
+plpy.execute(' \
+    CREATE TEMP TABLE tmp_int_verts ( \
+        int_id INTEGER, \
+        vert_id INTEGER \
+    ) \
+    ON COMMIT DROP;')
+sql = plpy.prepare(' \
+        INSERT INTO tmp_int_verts (int_id, vert_id) \
+        SELECT DISTINCT ON (ints.int_id) \
+                ints.int_id, verts.vert_id \
+        FROM    ' + intTable + ' ints \
+        JOIN    ' + vertTable + ' verts \
+                ON ints.int_id = verts.int_id \
+        WHERE   ints.int_id = ANY ($1) \
+        AND     EXISTS (SELECT  1 \
+                        FROM    ' + roadTable + ' roads \
+                        WHERE   roads.one_way IS NULL \
+                        AND     verts.road_id = roads.road_id) \
+        ORDER BY    ints.int_id ASC, \
+                    verts.vert_id ASC;',
+        ["integer[]"])
+plpy.execute(sql,[fromToPairs])
+# next add a vertex for every one-way road at
+# each intersection
+sql = plpy.prepare(' \
+        INSERT INTO tmp_int_verts (int_id, vert_id) \
+        SELECT  ints.int_id, verts.vert_id \
+        FROM    ' + intTable + ' ints \
+        JOIN    ' + vertTable + ' verts \
+                ON ints.int_id = verts.int_id \
+        WHERE   ints.int_id = ANY ($1) \
+        AND     EXISTS (SELECT  1 \
+                        FROM    ' + roadTable + ' roads \
+                        WHERE   roads.one_way IS NOT NULL \
+                        AND     verts.road_id = roads.road_id) \
+        ORDER BY    ints.int_id ASC, \
+                    verts.vert_id ASC;',
+        ["integer[]"])
+plpy.execute(sql,[fromToPairs])
+
+# get the verts
+plpy.info('Getting vertices')
+verts = []
+for fromInt, toInt in intPairs:
+    sql = plpy.prepare(' \
+            SELECT  f.vert_id AS f_vert, t.vert_id AS t_vert \
+            FROM    tmp_int_verts f, tmp_int_verts t \
+            WHERE   f.int_id = $1 \
+            AND     t.int_id = $2',
+            ["int","int"])
+    tmpVerts = plpy.execute(sql,[fromInt,toInt])
+    for v in tmpVerts:
+        verts.append(v['f_vert'])
+        verts.append(v['t_vert'])
+
+# get all possible shortest paths
+plpy.info('Getting candidate paths')
+sql = plpy.prepare(
+        'SELECT * FROM tdg.tdgShortestPathVerts($1,$2,$3,$4)',
+        ["text","text","integer[]","integer"]
+)
+paths = plpy.execute(
+            sql,
+            [linkTable, vertTable, verts, stress_]
+)
+
+# create dictionary of max sequence numbers
+# the dictionary key is the path_id value and
+# the values are a tuple with the first sequence
+# number and the last sequence number
+plpy.info('Identifying path sequences')
+pathSeqDict = {}
+for path in paths:
+    pathId = path.get('path_id')
+    pathSeq = path.get('move_sequence')
+    if not pathSeqDict.get(pathId):
+        pathSeqDict[pathId] = (pathSeq,pathSeq)
+    elif pathSeq > pathSeqDict.get(pathId)[1]:
+        pathSeqDict[pathId][1] = pathSeq
+
+# remove unnecessary intersection movements from the start and
+# end of each path
+plpy.info('Removing begin/end intersection movements')
+cleanPaths = []
+for idx, path in enumerate(paths):
+    try:
+        prevPathId = paths[idx-1].get('path_id')
+        prevMoveSeq = paths[idx-1].get('move_sequence')
+        prevIntId = paths[idx-1].get('int_id')
+    except IndexError:
+        prevPathId = -1
+        prevMoveSeq = -1
+        prevIntId = -1
+    pathId = path.get('path_id')
+    moveSeq = path.get('move_sequence')
+    intId = path.get('int_id')
+    try:
+        nextPathId = paths[idx+1].get('path_id')
+        nextMoveSeq = paths[idx+1].get('move_sequence')
+        nextIntId = paths[idx+1].get('int_id')
+    except IndexError:
+        nextPathId = -1
+        nextMoveSeq = -1
+        nextIntId = -1
+    lastPathSeq = pathSeqDict.get(pathId)[1]
+    if moveSeq == 1 and nextIntId > 0:
+        pass
+    elif moveSeq == 2 and intId:
+        pass
+    elif intId > 0 and moveSeq == lastPathSeq - 1:
+        pass
+    elif prevIntId > 0 and moveSeq == lastPathSeq:
+        pass
+    else:
+        cleanPaths.append(path)
+
+    elif (paths[i + 1]['path_id'] != path['path_id'] and
+            paths[i - 1]['int_id'] > 0):
+
+# pathRemove = []
+# i = 0
+# for path in paths:
+#     if (path['move_sequence'] == 2 and path['int_id'] > 0):
+#         pathRemove.append(i-1)
+#         pathRemove.append(i)
+#         paths[i + 1]['move_cost'] = 0
+#         paths[i + 1]['cumulative_cost'] = 0
+#     if (paths[i + 1]['path_id'] != path['path_id'] and
+#             paths[i - 1]['int_id'] > 0):
+#         pathRemove.append(i)
+#         pathRemove.append(i-1)
+#     i = i + 1
+# pathRemove.sort(reverse=True)
+# for r in pathRemove:
+#     del paths[r]
+
+# parse through paths and get shortest path id for each
+plpy.info('Identifying shortest paths')
+shortestPaths = []
+for path in paths:
+    pass
+
+ret = []
+for fromInt, toInt in intPairs:
+    pairIds = list(
+        set( getPairsFromMin(paths, fromInt) ) & set( getPairsFromMax(paths, toInt) )
+    )
+    minPair = minCostPair(paths, pairIds)
+    for row in paths:
+        if row['path_id'] == minPair:
+            ret.append(row)
+
+return ret
+
+$$ LANGUAGE plpythonu;
+ALTER FUNCTION tdg.tdgShortestPathIntersections(REGCLASS,REGCLASS,REGCLASS,REGCLASS,INTEGER[],INTEGER) OWNER TO gis;

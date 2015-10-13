@@ -65,55 +65,87 @@ ret = []
 pairId = 0
 for fromVert, toVert in vertPairs:
     pairId = pairId + 1
-    seq = 0
-    plpy.info('Checking for path existence from: ' + str(fromVert) + \
-        ' to: ' + str(toVert))
-    if nx.has_path(DG,source=fromVert,target=toVert):
-        plpy.info('Path found')
-        shortestPath = nx.shortest_path(DG,source=fromVert,target=toVert,weight='weight')
-        for v1 in shortestPath:
-            seq = seq + 1
-            v2 = getNextNode(shortestPath,v1)
-            if v2:
-                ret.append((pairId,
-                            fromVert,
-                            toVert,
-                            seq,
-                            None,
-                            v1,
-                            None,
-                            DG.node[v1]['int_id'],
-                            DG.node[v1]['weight']))
-                seq = seq + 1
-                ret.append((pairId,
-                            fromVert,
-                            toVert,
-                            seq,
-                            DG.edge[v1][v2]['link_id'],
-                            None,
-                            DG.edge[v1][v2]['road_id'],
-                            None,
-                            DG.edge[v1][v2]['weight']))
-            else:
-                ret.append((pairId,
-                            fromVert,
-                            toVert,
-                            seq,
-                            None,
-                            v1,
-                            None,
-                            DG.node[v1]['int_id'],
-                            DG.node[v1]['weight']))
-    else:
+    if fromVert == toVert:  # handle case where same from/to vert is given
         ret.append((pairId,
                     fromVert,
                     toVert,
+                    1,
                     None,
                     None,
                     None,
                     None,
-                    None,
-                    None))
+                    0,
+                    0))
+    else:
+        plpy.info('Checking for path existence from: ' + str(fromVert) + \
+            ' to: ' + str(toVert))
+        if nx.has_path(DG,source=fromVert,target=toVert):
+            plpy.info('Path found')
+            shortestPath = nx.shortest_path(DG,source=fromVert,target=toVert,weight='weight')
+            seq = 0
+            cost = 0
+            for v1 in shortestPath:
+                v2 = getNextNode(shortestPath,v1)
+                seq = seq + 1
+                if v2:
+                    if seq == 1:
+                        ret.append((pairId,
+                                    fromVert,
+                                    toVert,
+                                    seq,
+                                    None,
+                                    v1,
+                                    None,
+                                    DG.node[v1]['int_id'],
+                                    0,
+                                    0))
+                        seq = seq + 1
+                    else:
+                        cost = cost + DG.node[v1]['weight']
+                        ret.append((pairId,
+                                    fromVert,
+                                    toVert,
+                                    seq,
+                                    None,
+                                    v1,
+                                    None,
+                                    DG.node[v1]['int_id'],
+                                    DG.node[v1]['weight'],
+                                    cost))
+                        seq = seq + 1
+                    cost = cost + DG.edge[v1][v2]['weight']
+                    ret.append((pairId,
+                                fromVert,
+                                toVert,
+                                seq,
+                                DG.edge[v1][v2]['link_id'],
+                                None,
+                                DG.edge[v1][v2]['road_id'],
+                                None,
+                                DG.edge[v1][v2]['weight'],
+                                cost))
+                else:
+                    ret.append((pairId,
+                                fromVert,
+                                toVert,
+                                seq,
+                                None,
+                                v1,
+                                None,
+                                DG.node[v1]['int_id'],
+                                0,
+                                cost))
+        else:
+            ret.append((pairId,
+                        fromVert,
+                        toVert,
+                        None,
+                        None,
+                        None,
+                        None,
+                        None,
+                        None,
+                        None))
 
 return ret
 

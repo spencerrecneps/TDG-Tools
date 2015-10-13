@@ -1,5 +1,5 @@
 CREATE TYPE tdg.tdgShortestPathType AS (
-    pair_id INT,
+    path_id INT,
     from_vert INT,
     to_vert INT,
     move_sequence INT,
@@ -7,5 +7,6 @@ CREATE TYPE tdg.tdgShortestPathType AS (
     vert_id INT,
     road_id INT,
     int_id INT,
-    move_cost INT
+    move_cost INT,
+    cumulative_cost INT
 );
