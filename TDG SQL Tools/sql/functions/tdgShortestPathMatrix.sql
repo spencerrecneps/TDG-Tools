@@ -41,7 +41,7 @@ BEGIN
 
     IF append_ THEN
         RAISE NOTICE 'Checking whether table % exists',output_table;
-        EXECUTE '   SELECT  output_table
+        EXECUTE '   SELECT  table_name
                     FROM    tdgTableDetails($1)'
         USING   output_table
         INTO    namecheck;

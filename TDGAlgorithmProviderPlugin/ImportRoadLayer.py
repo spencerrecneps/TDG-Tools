@@ -29,6 +29,7 @@ import string
 import random
 from PyQt4.QtCore import QSettings
 from qgis.core import *
+#from qgis.utils import iface
 
 import processing
 from processing.core.GeoAlgorithm import GeoAlgorithm
@@ -106,6 +107,8 @@ class ImportRoadLayer(GeoAlgorithm):
             self.tr('Overwrite'), True))
 
         # CRS
+        #self.iface = qgis.utils.iface
+        # need to get srid and auto populate
         self.addParameter(ParameterCrs(self.TARGET_CRS,
             self.tr('Target CRS'), 'EPSG:4326'))
 
