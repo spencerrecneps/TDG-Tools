@@ -116,9 +116,9 @@ class ShortestPathFromLayer(GeoAlgorithm):
         # build the output layer
         fields = QgsFields()
         fields.append(QgsField('path_id', QVariant.Int))
+        fields.append(QgsField('sequence', QVariant.Int))
         fields.append(QgsField('from_vert', QVariant.Int))
         fields.append(QgsField('to_vert', QVariant.Int))
-        fields.append(QgsField('sequence', QVariant.Int))
         fields.append(QgsField('int_id', QVariant.Int))
         fields.append(QgsField('int_cost', QVariant.Int))
         fields.append(QgsField('road_id', QVariant.Int))
@@ -182,46 +182,68 @@ class ShortestPathFromLayer(GeoAlgorithm):
             roads[feat['road_id']] = feat.geometry()
 
         # loop through each destination and get shortest routes to all others
-        count = 0
-        for fromVert in vertIds:
-            for toVert in vertIds:
-                if not fromVert == toVert:
-                    count = count + 1
-                    if count % 1000 == 0:
-                        progress.setInfo('Shortest path for pair %i of %i'
-                                % (count, vertPairCount))
-                    if nx.has_path(DG,source=fromVert,target=toVert):
-                        shortestPath = nx.shortest_path(DG,
-                                                        source=fromVert,
-                                                        target=toVert,
-                                                        weight='weight')
+        try:
+            rowCount = 0
+            pairCount = 0
+            for fromVert in vertIds:
+                for toVert in vertIds:
+                    if not fromVert == toVert:
+                        pairCount += 1
                         seq = 0
                         cost = 0
-                        for i, v1 in enumerate(shortestPath):
-                            if i == 0:
-                                pass  #leave out because this is the start vertex
-                            elif i < len(shortestPath) - 1:
-                                v2 = shortestPath[i+1]
-                                seq += 1
-                                cost += DG.edge[v1][v2]['weight']
-                                cost += DG.node[v2]['weight']
+                        if pairCount % 1000 == 0:
+                            progress.setInfo('Shortest path for pair %i of %i'
+                                    % (pairCount, vertPairCount))
+                        if nx.has_path(DG,source=fromVert,target=toVert):
+                            shortestPath = nx.shortest_path(DG,
+                                                            source=fromVert,
+                                                            target=toVert,
+                                                            weight='weight')
+                            for i, v1 in enumerate(shortestPath):
+                                if i == 0:
+                                    pass  #leave out because this is the start vertex
+                                elif i == len(shortestPath) - 1:
+                                    pass  #Leave out because this is the last vertex
+                                else:
+                                    rowCount += 1
+                                    v2 = shortestPath[i+1]
+                                    roadId = DG.edge[v1][v2]['road_id']
+                                    if not roadId:
+                                        continue       #skip if this isn't a road link
+                                    seq += 1
+                                    v3 = None
+                                    if i < len(shortestPath) - 2:
+                                        v3 = shortestPath[i+2]
 
-                                # create the new feature
-                                f = QgsFeature(fields)
-                                f.setAttribute(0,count) #path_id
-                                f.setAttribute(1,fromVert) #from_vert
-                                f.setAttribute(2,toVert) #to_vert
-                                f.setAttribute(3,seq) #sequence
-                                f.setAttribute(4,DG.node[v2]['int_id']) #int_id
-                                f.setAttribute(5,DG.node[v2]['weight']) #int_cost
-                                f.setAttribute(6,DG.edge[v1][v2]['road_id']) #road_id
-                                f.setAttribute(7,DG.edge[v1][v2]['weight']) #road_cost
-                                f.setAttribute(8,cost) #cmtve_cost
-                                f.setGeometry(roads[DG.edge[v1][v2]['road_id']])
+                                    # set costs
+                                    linkCost = DG.edge[v1][v2]['weight']
+                                    intCost = 0
+                                    if v3 and not DG.edge[v2][v3]['road_id']:
+                                        intCost = DG.edge[v2][v3]['weight']
+                                    cost += linkCost
+                                    cost += intCost
 
-                                # NEED TO ADD ATTRIBUTES TO NEW FEATURE AND THEN
-                                writer.addFeature(f)
-                            # leave the last item out because it's the end vertex
+                                    # create the new feature
+                                    f = QgsFeature(fields)
+                                    f.setAttribute(0,pairCount) #path_id
+                                    f.setAttribute(1,seq) #sequence
+                                    f.setAttribute(2,fromVert) #from_vert
+                                    f.setAttribute(3,toVert) #to_vert
+                                    f.setAttribute(4,DG.node[v2]['int_id']) #int_id
+                                    f.setAttribute(5,intCost) #int_cost
+                                    f.setAttribute(6,roadId) #road_id
+                                    f.setAttribute(7,linkCost) #road_cost
+                                    f.setAttribute(8,cost) #cmtve_cost
+                                    if roadId in roads and roads.get(roadId):
+                                        pass
+                                        #f.setGeometry(roads.get(roadId))
 
-                    progress.setPercentage(90*count/vertPairCount)
+                                    # NEED TO ADD ATTRIBUTES TO NEW FEATURE AND THEN
+                                    writer.addFeature(f)
+                                    del f
+
+                        progress.setPercentage(10 + 90*pairCount/vertPairCount)
+        except Exception, e:
+            raise GeoAlgorithmExecutionException('Uncaught error: %s' % e)
+
         del writer

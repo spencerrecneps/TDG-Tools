@@ -25,6 +25,7 @@ __copyright__ = '(C) 2015, Spencer Gardner'
 
 __revision__ = '$Format:%H$'
 
+import networkx as nx
 import re
 from qgis.core import *
 from dbutils import LayerDbInfo, isDbTable
@@ -45,7 +46,7 @@ class NXUtils:
         dbType = roadsDb.getType()
         dbSRID = roadsDb.getSRID()
 
-        if isNetwork():  # need to test for existence of network layers
+        if self.isNetwork():  # need to test for existence of network layers
             pass
         else:
             raise GeoAlgorithmExecutionException('No network layer found for \
@@ -55,14 +56,14 @@ class NXUtils:
         uri = QgsDataSourceURI()
         self.vertTable = dbTable + '_net_vert'
         uri.setConnection(dbHost,str(dbPort),dbName,dbUser,dbPass)
-        uri.setDataSource(schema,self.vertTable,'geom','','vert_id')
+        uri.setDataSource(dbSchema,self.vertTable,'geom','','vert_id')
         uri.setWkbType(QGis.WKBPoint)
         self.vertLayer = QgsVectorLayer(uri.uri(),self.vertTable,'postgres')
 
         # create links layer
         self.linkTable = dbTable + '_net_link'
         uri.setConnection(dbHost,str(dbPort),dbName,dbUser,dbPass)
-        uri.setDataSource(schema,self.linkTable,'geom','','link_id')
+        uri.setDataSource(dbSchema,self.linkTable,'geom','','link_id')
         uri.setWkbType(QGis.WKBLineString)
         self.linkLayer = QgsVectorLayer(uri.uri(),self.linkTable,'postgres')
 
@@ -71,34 +72,36 @@ class NXUtils:
 
 
     def isNetwork(self):
-        return t
+        return True
 
     def buildNetwork(self):
         # edges
-        progress.setInfo('Adding edges')
-        for edge in vector.values(self.linkLayer,
+        edges = vector.values(self.linkLayer,
                                 'source_vert',
                                 'target_vert',
                                 'link_cost',
                                 'link_id',
                                 'link_stress',
-                                'road_id'):
-            self.DG.add_edge(edge['source_vert'],
-                        edge['target_vert'],
-                        weight=max(edge['link_cost'],0),
-                        link_id=edge['link_id'],
-                        stress=min(edge['link_stress'],99),
-                        road_id=edge['road_id'])
+                                'road_id')
+        edgeCount = len(edges['link_id'])
+        for i in range(edgeCount):
+            self.DG.add_edge(edges['source_vert'][i],
+                        edges['target_vert'][i],
+                        weight=max(edges['link_cost'][i],0),
+                        link_id=edges['link_id'][i],
+                        stress=min(edges['link_stress'][i],99),
+                        road_id=edges['road_id'][i])
 
         # vertices
-        progress.setInfo('Adding vertices')
-        for vert in vector.values(self.vertLayer,
+        verts = vector.values(self.vertLayer,
                                 'vert_id',
                                 'vert_cost',
-                                'int_id'):
-            vid = vert['vert_id']
-            self.DG.node[vid]['weight'] = max(vert['vert_cost'],0)
-            self.DG.node[vid]['int_id'] = vert['int_id']
+                                'int_id')
+        vertCount = len(verts['vert_id'])
+        for i in range(vertCount):
+            vid = verts['vert_id'][i]
+            self.DG.node[vid]['weight'] = max(verts['vert_cost'][i],0)
+            self.DG.node[vid]['int_id'] = verts['int_id'][i]
 
     def getNetwork(self):
         return self.DG
