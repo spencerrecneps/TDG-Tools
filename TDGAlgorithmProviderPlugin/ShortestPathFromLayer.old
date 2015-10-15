@@ -36,14 +36,11 @@ from processing.core.parameters import ParameterString
 from processing.core.parameters import ParameterNumber
 from processing.core.parameters import ParameterTableField
 from processing.core.parameters import ParameterSelection
-from processing.core.outputs import OutputVector
 
 from processing.tools import dataobjects, vector
 from processing.algs.qgis import postgis_utils
 from dbutils import LayerDbInfo
-from nxutils import NXUtils
 
-import networkx as nx
 
 class ShortestPathFromLayer(GeoAlgorithm):
     """This algorithm takes an input road network and
@@ -59,7 +56,8 @@ class ShortestPathFromLayer(GeoAlgorithm):
     DESTINATIONS_LAYER = 'DESTINATIONS_LAYER'
     VERT_ID_FIELD = 'VERT_ID_FIELD'
     STRESS = 'STRESS'
-    OUT_LAYER = 'OUT_LAYER'
+    SCHEMA_NAME = 'SCHEMA_NAME'
+    TABLE_NAME = 'TABLE_NAME'
 
 
     def defineCharacteristics(self):
@@ -99,8 +97,14 @@ class ShortestPathFromLayer(GeoAlgorithm):
             self.tr('Maximum allowable traffic stress (leave at 0 to ignore)'),
             minValue=0,maxValue=4))
 
-        # Output layer
-        self.addOutput(OutputVector(self.OUT_LAYER, self.tr('Shortest paths')))
+        # Schema name
+        self.SCHEMA_NAMES = ['generated','received','scratch']
+        self.addParameter(ParameterSelection(self.SCHEMA_NAME,
+            self.tr('Output schema'), self.SCHEMA_NAMES))
+
+        # Table name
+        self.addParameter(ParameterString(self.TABLE_NAME,
+            self.tr('Output table name')))
 
 
     def processAlgorithm(self, progress):
@@ -111,19 +115,8 @@ class ShortestPathFromLayer(GeoAlgorithm):
             self.getParameterValue(self.DESTINATIONS_LAYER))
         vertIdField = self.getParameterValue(self.VERT_ID_FIELD)
         stress = self.getParameterValue(self.STRESS)
-
-        # build the output layer
-        fields = QgsFields()
-        fields.append(QgsField('path_id', QVariant.Integer))
-        fields.append(QgsField('from_vert', QVariant.Integer))
-        fields.append(QgsField('to_vert', QVariant.Integer))
-        fields.append(QgsField('int_id', QVariant.Integer))
-        fields.append(QgsField('int_cost', QVariant.Integer))
-        fields.append(QgsField('road_id', QVariant.Integer))
-        fields.append(QgsField('road_cost', QVariant.Integer))
-        fields.append(QgsField('cmtve_cost', QVariant.Integer))
-        writer = self.getOutputFromName(self.OUT_LAYER).getVectorWriter(
-            fields, QGis.WKBLineString, roadsLayer.crs())
+        schemaName = self.SCHEMA_NAMES[self.getParameterValue(self.SCHEMA_NAME)]
+        tableName = self.getParameterValue(self.TABLE_NAME)
 
         # establish db connection
         roadsDb = LayerDbInfo(roadsLayer.source())
@@ -146,17 +139,18 @@ class ShortestPathFromLayer(GeoAlgorithm):
             raise GeoAlgorithmExecutionException(
                 self.tr("Couldn't connect to database:\n%s" % e.message))
 
-        # get network
-        progress.setInfo('Building network')
-        nu = NXUtils(roadsLayer)
-        nu.buildNetwork()
-        DG = nu.getNetwork()
+        # connection = None
+        # if connectionName:
+        #     dbpluginclass = createDbPlugin( 0, connectionName ) # connection type 0 = postgis
+        #     if dbpluginclass:
+        #         try:
+        #             connection = dbpluginclass.connect()
+        #         except BaseError as e:
+        #             progress.setText(e.msg)
+        # else:
+        #     progress.setText("<b>## Couldn't connect to database</b>")
 
-        # read input stress
-        if not stress:
-            stress = 99
-
-        # Get vertex IDs from input layer
+        # get vertex ids
         progress.setInfo('Getting vertex IDs')
         vertIds = []
         for val in vector.values(destsLayer,vertIdField)[vertIdField]:
@@ -167,73 +161,38 @@ class ShortestPathFromLayer(GeoAlgorithm):
                     self.tr('Bad vert_id values. Input field was %s. Check that \
                         these are integer values.' % vertIdField))
 
-        # count pairs
-        vertPairCount = len(vertIds) ** 2 - len(vertIds)
+        vertPairCount = len(vertIds) ** 2
         progress.setInfo('%i total destination pairs identified' % vertPairCount)
 
-        # set up the output attributes
-        attrs = QgsAttributes()
-        
+        # first construct the base sql call
+        baseSql = 'select tdg.tdgShortestPathMatrix('
+        baseSql = baseSql + "'" + dbTable + "',"
 
-        # loop through each destination and get shortest routes to all others
         count = 0
-        for fromVert in vertIds:
-            for toVert in vertIds:
-                if not fromVert == toVert:
-                    count = count + 1
-                    if count % 1000 == 0:
-                        progress.setInfo('Shortest path for pair %i of %i'
-                                % (count, vertPairCount))
-                    if nx.has_path(DG,source=fromVert,target=toVert):
-                        shortestPath = nx.shortest_path(DG,
-                                                        source=fromVert,
-                                                        target=toVert,
-                                                        weight='weight')
-                        seq = 0
-                        cost = 0
-                        for i, v1 in enumerate(shortestPath):
-                            if i == 0:
-                                pass  #leave out because this is the start vertex
-                            elif i < len(shortestPath) - 1:
-                                v2 = shortestPath[i+1]
-                                f = QgsFeature()
-                                tmpGeom - QgsGeometry(roadFeature.geometry())
-                                outFeat.setGeometry(tmpGeom)
-
-                                # NEED TO ADD ATTRIBUTES TO NEW FEATURE AND THEN
-                                write.addFeature('''NEW FEATURE HERE''')
-                            # leave the last item out because it's the end vertex
-
+        sql = "'{"
+        for fromVertId in vertIds:
+            for toVertId in vertIds:
+                count = count + 1
+                sql = sql + str(fromVertId) + ',' + str(toVertId) + ','
+                if count % 1000 == 0 or count == vertPairCount:
+                    progress.setInfo('Processing pair %i of %i'
+                        % (count, vertPairCount))
+                    sql = sql[:-1]                  #remove the last comma
+                    sql = sql + "}'::INTEGER[]"    #finish the call
+                    sql = baseSql + sql
+                    sql = sql + ",'" + schemaName + "',"
+                    sql = sql + "'" + tableName + "',"
+                    if count == 1000 or (count < 1000 and count == vertPairCount):
+                        sql = sql + "'t',"  #overwrite
+                        sql = sql + "'f',"  #append
                     else:
-
-
-
-                    if count % 1000 == 0 or count == vertPairCount:
-                        sql = sql[:-1]                  #remove the last comma
-                        sql = sql + "}'::INTEGER[]"    #finish the call
-                        sql = baseSql + sql
-                        sql = sql + ",'" + schemaName + "',"
-                        sql = sql + "'" + tableName + "',"
-                        if count == 1000 or (count < 1000 and count == vertPairCount):
-                            sql = sql + "'t',"  #overwrite
-                            sql = sql + "'f',"  #append
-                        else:
-                            sql = sql + "'f',"  #overwrite
-                            sql = sql + "'t',"  #append
-                        sql = sql + "'t',"  #map
-                        sql = sql + "NULL)"  #stress
-                        try:
-                            db._exec_sql_and_commit(sql)
-                            progress.setPercentage(100*count/vertPairCount)
-                            sql = "'{"
-                        except:
-                            raise
-
-
-    # function to return the next node in a shortest path
-    def getNextNode(nodes,node):
-        pos = nodes.index(node)
-        try:
-            return nodes[pos+1]
-        except:
-            return None
+                        sql = sql + "'f',"  #overwrite
+                        sql = sql + "'t',"  #append
+                    sql = sql + "'t',"  #map
+                    sql = sql + "NULL)"  #stress
+                    try:
+                        db._exec_sql_and_commit(sql)
+                        progress.setPercentage(100*count/vertPairCount)
+                        sql = "'{"
+                    except:
+                        raise

@@ -27,6 +27,9 @@ __revision__ = '$Format:%H$'
 
 import re
 
+def isDbTable(tableName):
+    pass
+
 class LayerDbInfo:
     def __init__(self, layerInfo):
         if layerInfo[:6] == 'dbname':
