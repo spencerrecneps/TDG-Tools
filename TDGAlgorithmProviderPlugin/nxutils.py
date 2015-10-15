@@ -34,7 +34,7 @@ from processing.core.GeoAlgorithmExecutionException import GeoAlgorithmExecution
 class NXUtils:
     def __init__(self, roadsLayer):
         # establish db connection
-        roadsDb = LayerDbInfo(roadsLayer.source())
+        roadsDb = LayerDbInfo(roadsLayer)
         dbHost = roadsDb.getHost()
         dbPort = roadsDb.getPort()
         dbName = roadsDb.getDBName()

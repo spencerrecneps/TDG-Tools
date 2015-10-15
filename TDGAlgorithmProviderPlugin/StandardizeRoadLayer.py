@@ -180,7 +180,7 @@ class StandardizeRoadLayer(GeoAlgorithm):
         delSource = self.getParameterValue(self.DELETE_SOURCE)
 
         # establish db connection
-        roadsDb = LayerDbInfo(inLayer.source())
+        roadsDb = LayerDbInfo(inLayer)
         dbHost = roadsDb.getHost()
         dbPort = roadsDb.getPort()
         dbName = roadsDb.getDBName()

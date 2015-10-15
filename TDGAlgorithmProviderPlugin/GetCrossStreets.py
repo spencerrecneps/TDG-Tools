@@ -77,7 +77,7 @@ class GetCrossStreets(GeoAlgorithm):
 
         # establish db connection
         progress.setInfo('Getting DB connection')
-        roadsDb = LayerDbInfo(inLayer.source())
+        roadsDb = LayerDbInfo(inLayer)
         dbHost = roadsDb.getHost()
         dbPort = roadsDb.getPort()
         dbName = roadsDb.getDBName()

@@ -25,7 +25,7 @@ __copyright__ = '(C) 2015, Spencer Gardner'
 
 __revision__ = '$Format:%H$'
 
-from PyQt4.QtCore import QSettings
+from PyQt4.QtCore import QSettings, QVariant
 from qgis.core import *
 
 import processing
@@ -104,6 +104,7 @@ class ShortestPathFromLayer(GeoAlgorithm):
 
 
     def processAlgorithm(self, progress):
+        progress.setPercentage(0)
         # Retrieve the values of the parameters entered by the user
         roadsLayer = dataobjects.getObjectFromUri(
             self.getParameterValue(self.ROADS_LAYER))
@@ -114,19 +115,21 @@ class ShortestPathFromLayer(GeoAlgorithm):
 
         # build the output layer
         fields = QgsFields()
-        fields.append(QgsField('path_id', QVariant.Integer))
-        fields.append(QgsField('from_vert', QVariant.Integer))
-        fields.append(QgsField('to_vert', QVariant.Integer))
-        fields.append(QgsField('int_id', QVariant.Integer))
-        fields.append(QgsField('int_cost', QVariant.Integer))
-        fields.append(QgsField('road_id', QVariant.Integer))
-        fields.append(QgsField('road_cost', QVariant.Integer))
-        fields.append(QgsField('cmtve_cost', QVariant.Integer))
+        fields.append(QgsField('path_id', QVariant.Int))
+        fields.append(QgsField('from_vert', QVariant.Int))
+        fields.append(QgsField('to_vert', QVariant.Int))
+        fields.append(QgsField('sequence', QVariant.Int))
+        fields.append(QgsField('int_id', QVariant.Int))
+        fields.append(QgsField('int_cost', QVariant.Int))
+        fields.append(QgsField('road_id', QVariant.Int))
+        fields.append(QgsField('road_cost', QVariant.Int))
+        fields.append(QgsField('cmtve_cost', QVariant.Int))
         writer = self.getOutputFromName(self.OUT_LAYER).getVectorWriter(
             fields, QGis.WKBLineString, roadsLayer.crs())
+        progress.setPercentage(2)
 
         # establish db connection
-        roadsDb = LayerDbInfo(roadsLayer.source())
+        roadsDb = LayerDbInfo(roadsLayer)
         dbHost = roadsDb.getHost()
         dbPort = roadsDb.getPort()
         dbName = roadsDb.getDBName()
@@ -145,12 +148,14 @@ class ShortestPathFromLayer(GeoAlgorithm):
         except postgis_utils.DbError, e:
             raise GeoAlgorithmExecutionException(
                 self.tr("Couldn't connect to database:\n%s" % e.message))
+        progress.setPercentage(3)
 
         # get network
         progress.setInfo('Building network')
         nu = NXUtils(roadsLayer)
         nu.buildNetwork()
         DG = nu.getNetwork()
+        progress.setPercentage(10)
 
         # read input stress
         if not stress:
@@ -171,9 +176,10 @@ class ShortestPathFromLayer(GeoAlgorithm):
         vertPairCount = len(vertIds) ** 2 - len(vertIds)
         progress.setInfo('%i total destination pairs identified' % vertPairCount)
 
-        # set up the output attributes
-        attrs = QgsAttributes()
-        
+        # set up dictionary of road_ids with their geoms
+        roads = dict()
+        for feat in vector.features(roadsLayer):
+            roads[feat['road_id']] = feat.geometry()
 
         # loop through each destination and get shortest routes to all others
         count = 0
@@ -196,44 +202,26 @@ class ShortestPathFromLayer(GeoAlgorithm):
                                 pass  #leave out because this is the start vertex
                             elif i < len(shortestPath) - 1:
                                 v2 = shortestPath[i+1]
-                                f = QgsFeature()
-                                tmpGeom - QgsGeometry(roadFeature.geometry())
-                                outFeat.setGeometry(tmpGeom)
+                                seq += 1
+                                cost += DG.edge[v1][v2]['weight']
+                                cost += DG.node[v2]['weight']
+
+                                # create the new feature
+                                f = QgsFeature(fields)
+                                f.setAttribute(0,count) #path_id
+                                f.setAttribute(1,fromVert) #from_vert
+                                f.setAttribute(2,toVert) #to_vert
+                                f.setAttribute(3,seq) #sequence
+                                f.setAttribute(4,DG.node[v2]['int_id']) #int_id
+                                f.setAttribute(5,DG.node[v2]['weight']) #int_cost
+                                f.setAttribute(6,DG.edge[v1][v2]['road_id']) #road_id
+                                f.setAttribute(7,DG.edge[v1][v2]['weight']) #road_cost
+                                f.setAttribute(8,cost) #cmtve_cost
+                                f.setGeometry(roads[DG.edge[v1][v2]['road_id']])
 
                                 # NEED TO ADD ATTRIBUTES TO NEW FEATURE AND THEN
-                                write.addFeature('''NEW FEATURE HERE''')
+                                writer.addFeature(f)
                             # leave the last item out because it's the end vertex
 
-                    else:
-
-
-
-                    if count % 1000 == 0 or count == vertPairCount:
-                        sql = sql[:-1]                  #remove the last comma
-                        sql = sql + "}'::INTEGER[]"    #finish the call
-                        sql = baseSql + sql
-                        sql = sql + ",'" + schemaName + "',"
-                        sql = sql + "'" + tableName + "',"
-                        if count == 1000 or (count < 1000 and count == vertPairCount):
-                            sql = sql + "'t',"  #overwrite
-                            sql = sql + "'f',"  #append
-                        else:
-                            sql = sql + "'f',"  #overwrite
-                            sql = sql + "'t',"  #append
-                        sql = sql + "'t',"  #map
-                        sql = sql + "NULL)"  #stress
-                        try:
-                            db._exec_sql_and_commit(sql)
-                            progress.setPercentage(100*count/vertPairCount)
-                            sql = "'{"
-                        except:
-                            raise
-
-
-    # function to return the next node in a shortest path
-    def getNextNode(nodes,node):
-        pos = nodes.index(node)
-        try:
-            return nodes[pos+1]
-        except:
-            return None
+                    progress.setPercentage(90*count/vertPairCount)
+        del writer

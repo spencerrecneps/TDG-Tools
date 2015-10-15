@@ -79,7 +79,7 @@ class MakeRoadNetwork(GeoAlgorithm):
         addToMap = self.getParameterValue(self.ADDTOMAP)
 
         # establish db connection
-        roadsDb = LayerDbInfo(inLayer.source())
+        roadsDb = LayerDbInfo(inLayer)
         dbHost = roadsDb.getHost()
         dbPort = roadsDb.getPort()
         dbName = roadsDb.getDBName()

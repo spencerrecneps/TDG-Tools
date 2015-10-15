@@ -26,30 +26,70 @@ __copyright__ = '(C) 2015, Spencer Gardner'
 __revision__ = '$Format:%H$'
 
 import re
+from PyQt4.QtCore import QSettings
+from qgis.core import *
+from processing.core.GeoAlgorithmExecutionException import GeoAlgorithmExecutionException
+
 
 def isDbTable(tableName):
     pass
 
 class LayerDbInfo:
-    def __init__(self, layerInfo):
-        if layerInfo[:6] == 'dbname':
-            layerInfo = layerInfo.replace('\'','"')
-            vals = dict(re.findall('(\S+)="?(.*?)"? ',layerInfo))
-            self.dbName = str(vals['dbname'])
-            self.key = str(vals['key'])
-            self.user = str(vals['user'])
-            self.password = str(vals['password'])
-            self.srid = int(vals['srid'])
-            self.type = str(vals['type'])
-            self.host = str(vals['host'])
-            self.port = int(vals['port'])
+    def __init__(self, layer):
+        self.connName = None
+        self.dbName = None
+        self.schemaName = None
+        self.tableName = None
+        self.key = None
+        self.user = None
+        self.password = None
+        self.srid = None
+        self.type = None
+        self.host = None
+        self.port = None
 
-            # need some extra processing to get table name and schema
-            table = vals['table'].split('.')
-            self.schemaName = table[0].strip('"')
-            self.tableName = table[1].strip('"')
-        else:
-            raise
+        # test for postgis and get the provider
+        if not layer.providerType() == 'postgres':
+            raise GeoAlgorithmExecutionException('Layer %s does not \
+                    come from a PostGIS table' % layer.name())
+        provider = layer.dataProvider()
+
+        # parse the table details
+        vals = dict(re.findall('(\S+)="?(.*?)"? ',provider.dataSourceUri()))
+        self.dbName = str(vals['dbname']).strip("'")
+        self.key = str(vals['key']).strip("'")
+        self.srid = int(provider.crs().postgisSrid())
+        self.type = str(vals['type'])
+        table = vals['table'].split('.')
+        self.schemaName = table[0].strip('"')
+        self.tableName = table[1].strip('"')
+
+        if not self.dbName:
+            raise GeoAlgorithmExecutionException('There was a problem \
+                    retrieving database information for layer %s' % l.name())
+
+        # get db details by
+        # searching qgis db connections for a match to the layer
+        settings = QSettings()
+        settings.beginGroup('/PostgreSQL/connections/')
+        try:
+            for conn in settings.childGroups():
+                if settings.value(conn + '/database') == self.dbName:
+                    self.connName = conn
+                    self.user = settings.value(conn + '/username')
+                    self.host = settings.value(conn + '/host')
+                    self.password = settings.value(conn + '/password')
+                    self.port = int(settings.value(conn + '/port'))
+        except Exception, e:
+            raise GeoAlgorithmExecutionException('Unspecified error reading \
+                    database connections: %s' % e)
+
+        if not self.connName:
+            raise GeoAlgorithmExecutionException('No stored database connection \
+                    identified for layer %s' % layer.name())
+
+    def getConnName(self):
+        return self.connName
 
     def getDBName(self):
         return self.dbName
