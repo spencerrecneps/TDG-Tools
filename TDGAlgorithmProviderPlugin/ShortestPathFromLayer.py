@@ -179,7 +179,10 @@ class ShortestPathFromLayer(GeoAlgorithm):
         # set up dictionary of road_ids with their geoms
         roads = dict()
         for feat in vector.features(roadsLayer):
-            roads[feat['road_id']] = feat.geometry()
+            #roads[feat['road_id']] = feat.geometry()
+            f = QgsFeature(fields)
+            f.setGeometry(feat.geometry())
+            roads[feat['road_id']] = f
 
         # loop through each destination and get shortest routes to all others
         try:
@@ -224,19 +227,22 @@ class ShortestPathFromLayer(GeoAlgorithm):
                                     cost += intCost
 
                                     # create the new feature
-                                    f = QgsFeature(fields)
-                                    f.setAttribute(0,pairCount) #path_id
-                                    f.setAttribute(1,seq) #sequence
-                                    f.setAttribute(2,fromVert) #from_vert
-                                    f.setAttribute(3,toVert) #to_vert
-                                    f.setAttribute(4,DG.node[v2]['int_id']) #int_id
-                                    f.setAttribute(5,intCost) #int_cost
-                                    f.setAttribute(6,roadId) #road_id
-                                    f.setAttribute(7,linkCost) #road_cost
-                                    f.setAttribute(8,cost) #cmtve_cost
                                     if roadId in roads and roads.get(roadId):
-                                        pass
+                                        #f = QgsFeature(fields)
+                                        f = roads.get(roadId)
+                                        f.setAttribute(0,pairCount) #path_id
+                                        f.setAttribute(1,seq) #sequence
+                                        f.setAttribute(2,fromVert) #from_vert
+                                        f.setAttribute(3,toVert) #to_vert
+                                        f.setAttribute(4,DG.node[v2]['int_id']) #int_id
+                                        f.setAttribute(5,intCost) #int_cost
+                                        f.setAttribute(6,roadId) #road_id
+                                        f.setAttribute(7,linkCost) #road_cost
+                                        f.setAttribute(8,cost) #cmtve_cost
+                                    #if roadId in roads and roads.get(roadId):
+                                        #pass
                                         #f.setGeometry(roads.get(roadId))
+                                        #f.setGeometry(roads.get(roadId).geometry())
 
                                     # NEED TO ADD ATTRIBUTES TO NEW FEATURE AND THEN
                                     writer.addFeature(f)
