@@ -88,7 +88,7 @@ class CalculateStress(GeoAlgorithm):
         inLayer = dataobjects.getObjectFromUri(self.getParameterValue(self.ROADS_LAYER))
 
         # establish db connection
-        roadsDb = LayerDbInfo(inLayer.source())
+        roadsDb = LayerDbInfo(inLayer)
         dbHost = roadsDb.getHost()
         dbPort = roadsDb.getPort()
         dbName = roadsDb.getDBName()
