@@ -120,3 +120,16 @@ class LayerDbInfo:
 
     def getTable(self):
         return self.tableName
+
+    def getUniqueLayerName(self,baseName):
+        names = []
+        for layer in QgsMapLayerRegistry.instance().mapLayers().values():
+            names.append( layer.name() )
+
+        newLayerName = str(baseName)
+        i = 0
+        while newLayerName in names:
+            i+=1
+            newLayerName = u"%s_%d" % (baseName, i)
+            
+        return newLayerName

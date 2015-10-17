@@ -31,48 +31,78 @@ from qgis.core import *
 from dbutils import LayerDbInfo, isDbTable
 from processing.tools import vector
 from processing.core.GeoAlgorithmExecutionException import GeoAlgorithmExecutionException
+from db_manager.db_plugins import createDbPlugin
+from db_manager.db_plugins.plugin import DBPlugin, Schema, Table, BaseError
 
 class NXUtils:
     def __init__(self, roadsLayer):
-        # establish db connection
+        # layers
+        self.vertLayer = None
+        self.linkLayer = None
+
+        # db helpers
         roadsDb = LayerDbInfo(roadsLayer)
-        dbHost = roadsDb.getHost()
-        dbPort = roadsDb.getPort()
-        dbName = roadsDb.getDBName()
-        dbUser = roadsDb.getUser()
-        dbPass = roadsDb.getPassword()
-        dbSchema = roadsDb.getSchema()
+        dbConnName = roadsDb.getConnName()
         dbTable = roadsDb.getTable()
-        dbType = roadsDb.getType()
-        dbSRID = roadsDb.getSRID()
+        dbSchema = roadsDb.getSchema()
+        dbType = 'postgis'
+        connection = None
 
-        if self.isNetwork():  # need to test for existence of network layers
-            pass
+        # get connection to db
+        if dbConnName:
+            dbPluginClass = createDbPlugin(dbType,dbConnName)
+            if dbPluginClass:
+                try:
+                    connection = dbPluginClass.connect()
+                except BaseError, e:
+                    raise GeoAlgorithmExecutionException('Error connecting to \
+                        database %s. Exception: %s' % (dbConnNamem, e))
+            else:
+                raise GeoAlgorithmExecutionException('Error connecting to \
+                    database %s' % dbConnName)
         else:
-            raise GeoAlgorithmExecutionException('No network layer found for \
-                    table %s' % dbTable)
+            raise GeoAlgorithmExecutionException('Could not identify database \
+                from layer %s' % roadsLayer.name())
 
-        # create verts layer
-        uri = QgsDataSourceURI()
-        self.vertTable = dbTable + '_net_vert'
-        uri.setConnection(dbHost,str(dbPort),dbName,dbUser,dbPass)
-        uri.setDataSource(dbSchema,self.vertTable,'geom','','vert_id')
-        uri.setWkbType(QGis.WKBPoint)
-        self.vertLayer = QgsVectorLayer(uri.uri(),self.vertTable,'postgres')
+        # get network layers
+        if connection:
+            db = dbPluginClass.database()
+            if db:
+                vertTable = dbTable + '_net_vert'
+                linkTable = dbTable + '_net_link'
 
-        # create links layer
-        self.linkTable = dbTable + '_net_link'
-        uri.setConnection(dbHost,str(dbPort),dbName,dbUser,dbPass)
-        uri.setDataSource(dbSchema,self.linkTable,'geom','','link_id')
-        uri.setWkbType(QGis.WKBLineString)
-        self.linkLayer = QgsVectorLayer(uri.uri(),self.linkTable,'postgres')
+                self.vertLayer = db.toSqlLayer(
+                    'SELECT * FROM %s.%s' % (dbSchema,vertTable),
+                    'geom',
+                    'vert_id',
+                    roadsDb.getUniqueLayerName(vertTable),
+                    QgsMapLayer.VectorLayer,
+                    False
+                )
+
+                self.linkLayer = db.toSqlLayer(
+                    'SELECT * FROM %s.%s' % (dbSchema,linkTable),
+                    'geom',
+                    'link_id',
+                    roadsDb.getUniqueLayerName(linkTable),
+                    QgsMapLayer.VectorLayer,
+                    False
+                )
+
+                # raise error if couldn't load network tables
+                if not (self.vertLayer.isValid() and self.linkLayer.isValid()):
+                    raise GeoAlgorithmExecutionException('Could not load \
+                        tables %s and %s. Check to make sure %s has a \
+                        network built.' % (vertTable,linkTable,roadsLayer.name()))
+            else:
+                raise GeoAlgorithmExecutionException('Database not found \
+                    for layer %s' % roadsLayer.name())
+        else:
+            raise GeoAlgorithmExecutionException('Error connecting to \
+                database %s' % dbConnName)
 
         # other vars
         self.DG = nx.DiGraph()
-
-
-    def isNetwork(self):
-        return True
 
     def buildNetwork(self):
         # edges
