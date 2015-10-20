@@ -38,6 +38,7 @@ from MakeRoadNetwork import MakeRoadNetwork
 from CalculateStress import CalculateStress
 from GetCrossStreets import GetCrossStreets
 from ShortestPathFromLayer import ShortestPathFromLayer
+from TravelShed import TravelShed
 from Meld import Meld
 
 pluginPath = os.path.normpath(os.path.dirname(__file__))
@@ -58,7 +59,8 @@ class TDGAlgorithmProvider(AlgorithmProvider):
             CalculateStress(),
             GetCrossStreets(),
             ShortestPathFromLayer(),
-            Meld()]
+            Meld(),
+            TravelShed()]
         for alg in self.alglist:
             alg.provider = self
 

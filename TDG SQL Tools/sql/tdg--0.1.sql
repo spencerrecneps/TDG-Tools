@@ -262,7 +262,13 @@ BEGIN
     END IF;
 
     --set existing movements to null
-    EXECUTE 'UPDATE '||link_table_||' SET movement = NULL;';
+    EXECUTE '
+        UPDATE  '||link_table_||'
+        SET     movement = NULL
+        FROM    '||int_table_||' ints
+        WHERE   ints.int_id = '||link_table_||'.int_id
+        AND     ints.int_id = ANY ($1);'
+    USING   int_ids_;
 
     --loop through links with int legs > 3. find r/l turns using sin/cos
     FOR link_record IN
@@ -2128,7 +2134,7 @@ BEGIN
 
     IF append_ THEN
         RAISE NOTICE 'Checking whether table % exists',output_table;
-        EXECUTE '   SELECT  output_table
+        EXECUTE '   SELECT  table_name
                     FROM    tdgTableDetails($1)'
         USING   output_table
         INTO    namecheck;
@@ -2148,8 +2154,19 @@ BEGIN
             DROP INDEX IF EXISTS idx_'||table_name_||'_int;
         ';
     ELSE        --create table
-        EXECUTE 'CREATE TABLE '||output_table||' OF tdg.tdgShortestPathType;';
-        EXECUTE 'ALTER TABLE '||output_table||' ADD COLUMN id SERIAL PRIMARY KEY';
+        EXECUTE 'CREATE TABLE '||output_table||' (
+            id SERIAL PRIMARY KEY,
+            path_id INT,
+            from_vert INT,
+            to_vert INT,
+            move_sequence INT,
+            link_id INT,
+            vert_id INT,
+            road_id INT,
+            int_id INT,
+            move_cost INT,
+            cumulative_cost INT
+        );';
     END IF;
 
     RAISE NOTICE 'Getting shortest paths';
@@ -2186,7 +2203,7 @@ BEGIN
         IF NOT append_ THEN
             EXECUTE '
                 ALTER TABLE '||output_table||'
-                ADD COLUMN geom geomtry(linestring,'||srid::TEXT||');';
+                ADD COLUMN geom geometry(linestring,'||srid::TEXT||');';
         END IF;
 
         -- update
