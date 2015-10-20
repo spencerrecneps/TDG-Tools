@@ -17,7 +17,13 @@ BEGIN
     END IF;
 
     --set existing movements to null
-    EXECUTE 'UPDATE '||link_table_||' SET movement = NULL;';
+    EXECUTE '
+        UPDATE  '||link_table_||'
+        SET     movement = NULL
+        FROM    '||int_table_||' ints
+        WHERE   ints.int_id = '||link_table_||'.int_id
+        AND     ints.int_id = ANY ($1);'
+    USING   int_ids_;
 
     --loop through links with int legs > 3. find r/l turns using sin/cos
     FOR link_record IN
