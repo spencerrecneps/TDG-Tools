@@ -159,13 +159,12 @@ class TravelShed(GeoAlgorithm):
         polyWriter = self.getOutputFromName(self.POLYGON_LAYER).getVectorWriter(
             polyFields, QGis.WKBPolygon, roadsLayer.crs())
 
-        # # build the road feature output layer
-        # routeFields = QgsFields()
-        # routeFields.append(QgsField('input_id', QVariant.Int))
-        # routeFields.append(QgsField('cost', QVariant.Int))
-        # routeFields.append(QgsField('cmtve_cost', QVariant.Int))
-        # routeWriter = self.getOutputFromName(self.LINE_LAYER).getVectorWriter(
-        #     routeFields, QGis.WKBLineString, roadsLayer.crs())
+        # build the road feature output layer
+        routeFields = QgsFields()
+        routeFields.append(QgsField('input_id', QVariant.Int))
+        routeFields.append(QgsField('road_id', QVariant.Int))
+        routeWriter = self.getOutputFromName(self.LINE_LAYER).getVectorWriter(
+            routeFields, QGis.WKBLineString, roadsLayer.crs())
 
         progress.setPercentage(2)
 
@@ -213,11 +212,11 @@ class TravelShed(GeoAlgorithm):
                     self.tr('Bad vert_id values. Input field was %s. Check that \
                         these are integer values.' % vertIdField))
 
+        # loop through the point features and generate travel sheds for each
         count = 0
         totalCount = len(vertIds)
         vertLayer = nu.getVertLayer()
         for vertId in vertIds:
-            #progress.setInfo('Travel shed for feature ' + str(vertId))
             outPolyFeat = QgsFeature(polyFields)
             outPolyFeat.setAttribute(0,vertId)
             outPolyGeom = QgsGeometry()
@@ -232,6 +231,7 @@ class TravelShed(GeoAlgorithm):
                 weight='weight'
             )
 
+            # build the convex hull around the travel shed
             vertFeats = vector.features(vertLayer)
             for f in vertFeats:
                 if f['vert_id'] in paths[0].keys():
@@ -248,4 +248,32 @@ class TravelShed(GeoAlgorithm):
                     raise GeoAlgorithmExecutionException(
                         'Exception while processing geometries: ' + str(e))
 
+            # build the road path around each travel shed
+            roadIds = set()
+            for v, path in paths[1].iteritems():
+                for i, v1 in enumerate(path):
+                    if i == 0:
+                        pass
+                    elif i == len(path) - 1:
+                        pass
+                    else:
+                        v2 = path[i+1]
+                        roadId = DG.edge[v1][v2]['road_id']
+                        if roadId:
+                            roadIds.add(roadId)
+
+            for f in vector.features(roadsLayer):
+                roadId = f['road_id']
+                if roadId in roadIds:
+                    try:
+                        routeFeat = QgsFeature(routeFields)
+                        routeFeat.setAttribute(0,vertId)
+                        routeFeat.setAttribute(1,roadId)
+                        routeFeat.setGeometry(QgsGeometry(f.geometry()))
+                        routeWriter.addFeature(routeFeat)
+                    except Exception, e:
+                        raise GeoAlgorithmExecutionException(
+                            'Exception while processing geometries: ' + str(e))
+
         del polyWriter
+        del routeWriter
