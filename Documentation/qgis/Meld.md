@@ -1,19 +1,24 @@
 #Meld
 
 ##Parameters
-Name        | Type
-------------|----------
-temp_table_ | REGCLASS
-new_table_  | TEXT
-schema_     | TEXT
-srid_       | INTEGER
-overwrite_  | BOOLEAN
+Name         | Type
+-------------|----------
+TARGET_LAYER | Line layer
+SOURCE_LAYER | Line layer
+TOLERANCE    | Number
+OUT_LAYER    | File path
+KEEP_NULLS   | Checkbox
 
 **TARGET_LAYER** - The layer to which information should be joined.
+
 **SOURCE_LAYER** - The layer with information to be joined to the target features.
-**TOLERANCE** - The search distance for finding matching features.
+
+**TOLERANCE** - The search distance for finding matching features. (Given in
+units of the coordinate system.)
+
 **OUT_LAYER** - The location to save the output layer (if blank, saves as a
 temporary layer)
+
 **KEEP_NULLS** - Whether to keep target features that do not have a match in the
 source layer.
 
