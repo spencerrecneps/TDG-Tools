@@ -172,9 +172,9 @@ class ShortestPathFromLayer(GeoAlgorithm):
             self.getParameterValue(self.DESTINATIONS_LAYER))
         vertIdField = self.getParameterValue(self.VERT_ID_FIELD)
         stress = self.getParameterValue(self.STRESS)
-        keepRaw = self.KEEP_RAW
-        keepRoutes = self.KEEP_ROUTES
-        keepSums = self.KEEP_SUMS
+        keepRaw = self.getParameterValue(self.KEEP_RAW)
+        keepRoutes = self.getParameterValue(self.KEEP_ROUTES)
+        keepSums = self.getParameterValue(self.KEEP_SUMS)
 
         # build the raw output layer
         if keepRaw:
