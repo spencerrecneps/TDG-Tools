@@ -33,3 +33,8 @@ are any matches, they are then searched for their distance from
 the start, mid, and end points of each target feature. If a source feature
 is within the tolerance distance of all three points, it is considered a match.
 A tie is broken by the average distance from all three points.
+
+As an example, imagine you received a layer representing all the bike lanes in
+a municipality, but the lines don't line up perfectly with the roads layer
+so a spaital join won't work. You can use this tool to assign the bike
+lane data to the roads that they overlap with.
