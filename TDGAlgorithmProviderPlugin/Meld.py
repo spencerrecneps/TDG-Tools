@@ -25,16 +25,18 @@ __copyright__ = '(C) 2015, Spencer Gardner'
 
 __revision__ = '$Format:%H$'
 
-from PyQt4.QtCore import QSettings
+from PyQt4.QtCore import QVariant
 from qgis.core import *
+from math import sqrt
 
 import processing
 from processing.core.GeoAlgorithm import GeoAlgorithm
 from processing.core.GeoAlgorithmExecutionException import GeoAlgorithmExecutionException
 from processing.core.parameters import ParameterVector
-from processing.core.parameters import ParameterTableField
 from processing.core.parameters import ParameterBoolean
-
+from processing.core.parameters import ParameterNumber
+from processing.core.outputs import OutputVector
+from processing.tools import dataobjects, vector
 
 class Meld(GeoAlgorithm):
     """This algorithm takes an target line dataset and a
@@ -48,10 +50,13 @@ class Meld(GeoAlgorithm):
     # calling from the QGIS console.
 
     TARGET_LAYER = 'TARGET_LAYER'
-    TARGET_ID = 'TARGET_ID'
+    #TARGET_ID = 'TARGET_ID'
     SOURCE_LAYER = 'SOURCE_LAYER'
-    SOURCE_ID = 'SOURCE_ID'
+    #SOURCE_ID = 'SOURCE_ID'
     TOLERANCE = 'TOLERANCE'
+    OUT_LAYER = 'OUT_LAYER'
+    KEEP_NULLS = 'KEEP_NULLS'
+
 
 
     def defineCharacteristics(self):
@@ -71,38 +76,119 @@ class Meld(GeoAlgorithm):
         self.addParameter(ParameterVector(self.TARGET_LAYER,
             self.tr('Target layer'), [ParameterVector.VECTOR_TYPE_LINE], optional=False))
 
-        # Unique identifier for target layer
-        # Required
-        self.addParameter(ParameterTableField(self.TARGET_ID,
-            self.tr('Unique identifier for target layer'),
-            parent=self.TARGET_LAYER,
-            optional=False))
+        # # Unique identifier for target layer
+        # # Required
+        # self.addParameter(ParameterTableField(self.TARGET_ID,
+        #     self.tr('Unique identifier for target layer'),
+        #     parent=self.TARGET_LAYER,
+        #     optional=False))
 
         # Source layer. Must be line type
         # It is a mandatory (not optional) one, hence the False argument
         self.addParameter(ParameterVector(self.SOURCE_LAYER,
             self.tr('Source layer'), [ParameterVector.VECTOR_TYPE_LINE], optional=False))
 
-        # Unique identifier for source layer
-        # Required
-        self.addParameter(ParameterTableField(self.SOURCE_ID,
-            self.tr('Unique identifier for source layer'),
-            parent=self.SOURCE_LAYER,
-            optional=False))
+        # # Unique identifier for source layer
+        # # Required
+        # self.addParameter(ParameterTableField(self.SOURCE_ID,
+        #     self.tr('Unique identifier for source layer'),
+        #     parent=self.SOURCE_LAYER,
+        #     optional=False))
+
+        # Tolerance
+        self.addParameter(
+            ParameterNumber(
+                self.TOLERANCE,
+                self.tr('Search tolerance'),
+                minValue=0
+            )
+        )
+
+        # Output layer
+        self.addOutput(
+            OutputVector(self.OUT_LAYER, self.tr('Output layer'))
+        )
+
+        # Keep nonmatches?
+        self.addParameter(
+            ParameterBoolean(
+                self.KEEP_NULLS,
+                self.tr('Keep non-matching target features?'), default=False
+            )
+        )
+
 
     def processAlgorithm(self, progress):
         # Retrieve the values of the parameters entered by the user
         targetLayer = dataobjects.getObjectFromUri(self.getParameterValue(self.TARGET_LAYER))
         sourceLayer = dataobjects.getObjectFromUri(self.getParameterValue(self.SOURCE_LAYER))
-        targetIdField = self.getParameterValue(self.TARGET_ID)
-        sourceIdField = self.getParameterValue(self.SOURCE_ID)
+        # targetIdField = self.getParameterValue(self.TARGET_ID)
+        # sourceIdField = self.getParameterValue(self.SOURCE_ID)
+        tolerance = self.getParameterValue(self.TOLERANCE)
+        fields = QgsFields()
+        fields.append(QgsField('source_id', QVariant.Int))
+        fields.append(QgsField('target_id', QVariant.Int))
+        writer = self.getOutputFromName(self.OUT_LAYER).getVectorWriter(
+            fields, QGis.WKBLineString, targetLayer.crs())
+        keepNulls = self.getParameterValue(self.KEEP_NULLS)
 
         # loop through target features
+        for targetFeat in vector.features(targetLayer):
+            outFeat = QgsFeature(fields)
+            targetId = targetFeat.id()
+            matchId = None
+            outFeat.setAttribute(0,targetId)
 
-            # identify candidate source features (if any)
+            targetGeom = QgsGeometry(targetFeat.geometry())
+            targetBox = targetGeom.buffer(tolerance,1).boundingBox()
+            avgDist = None
+
+            # get first, last, and mid points of target feature
+            firstPoint = targetGeom.interpolate(0)
+            midPoint = targetGeom.interpolate(targetGeom.length()*0.5)
+            lastPoint = targetGeom.interpolate(targetGeom.length()*1)
 
             # loop through candidate source features
+            for sourceFeat in vector.features(sourceLayer):
+                # identify candidate source features (if any)
+                if sourceFeat.geometry().intersects(targetBox):
+                    sourceGeom = QgsGeometry(sourceFeat.geometry())
+                    sourceId = sourceFeat.id()
 
-                # generate points along each target feature at intervals
+                    if sourceGeom.length() < (targetGeom.length()*0.5):
+                        continue #skip a feature if it's not at least 1/2 as long as target
 
-                # loop through points and get distance to source
+                    # get distances
+                    firstDist = firstPoint.distance(sourceGeom)
+                    midDist = midPoint.distance(sourceGeom)
+                    lastDist = lastPoint.distance(sourceGeom)
+
+                    # skip a feature if it's beyond the tolerance at any point on the target
+                    if (firstDist > tolerance or
+                            midDist > tolerance or
+                            lastDist > tolerance):
+                        continue
+
+                    # # check deviation
+                    # dev = sqrt((midDist - firstDist)**2 + (midDist - lastDist)**2)
+                    # if dev > tolerance:
+                    #     continue
+
+                    # get the closest match
+                    checkDist = sum([firstDist,midDist,lastDist])/3
+
+                    if avgDist is None:
+                        avgDist = checkDist
+                        matchId = sourceId
+                    elif checkDist < avgDist:
+                        avgDist = checkDist
+                        matchId = sourceId
+
+            outFeat.setAttribute(1,matchId)
+            outFeat.setGeometry(targetGeom)
+            if keepNulls:
+                writer.addFeature(outFeat)
+            elif not matchId is None:
+                writer.addFeature(outFeat)
+
+        del writer
