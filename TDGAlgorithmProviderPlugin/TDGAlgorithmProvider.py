@@ -33,6 +33,7 @@ from processing.core.ProcessingConfig import Setting, ProcessingConfig
 from processing.script.ScriptUtils import ScriptUtils
 
 from ImportRoadLayer import ImportRoadLayer
+from ImportRoadLayerNew import ImportRoadLayerNew
 from StandardizeRoadLayer import StandardizeRoadLayer
 from MakeRoadNetwork import MakeRoadNetwork
 from CalculateStress import CalculateStress
@@ -53,6 +54,7 @@ class TDGAlgorithmProvider(AlgorithmProvider):
         # Load algorithms
         self.alglist = [
             ImportRoadLayer(),
+            ImportRoadLayerNew(),
             StandardizeRoadLayer(),
             MakeRoadNetwork(),
             CalculateStress(),

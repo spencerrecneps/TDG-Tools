@@ -53,71 +53,26 @@ class TDGAlgorithm(GeoAlgorithm):
     vertsTable = None
     linksLayer = None
     linksTable = None
+    dbPluginClass = None
     dbConnection = None
     db = None
     schema = None
 
 
-    # assign layers to the various TDG datasets using the roads layer as input
-    def setLayersFromRoadsLayer(self,inRoadsLayer):
-        if not self.db:
-            GeoAlgorithmExecutionException('Connection to database not set for \
-                layer %s' % inRoadsLayer.name())
-
-        self.intsTable = self.roadsTable + '_intersections'
-        self.vertsTable = self.roadsTable + '_net_vert'
-        self.linksTable = self.roadsTable + '_net_link'
-
-        self.intsLayer = db.toSqlLayer(
-            'SELECT * FROM %s.%s' % (self.schema,intsTable),
-            'geom',
-            'int_id',
-            roadsDb.getUniqueLayerName(intsTable),
-            QgsMapLayer.VectorLayer,
-            False
-        )
-        if not (self.intsLayer.isValid()):
-            self.intsLayer = None
-
-        self.vertsLayer = db.toSqlLayer(
-            'SELECT * FROM %s.%s' % (self.schema,vertsTable),
-            'geom',
-            'vert_id',
-            roadsDb.getUniqueLayerName(vertsTable),
-            QgsMapLayer.VectorLayer,
-            False
-        )
-        if not (self.vertsLayer.isValid()):
-            self.vertsLayer = None
-
-        self.linksLayer = db.toSqlLayer(
-            'SELECT * FROM %s.%s' % (self.schema,linksTable),
-            'geom',
-            'link_id',
-            roadsDb.getUniqueLayerName(linksTable),
-            QgsMapLayer.VectorLayer,
-            False
-        )
-        if not (self.linksLayer.isValid()):
-            self.linksLayer = None
-
-
     # set the reference to the database
-    def setDbFromRoadsLayer(self,inRoadsLayer):
+    def setDbFromLayer(self,inLayer):
         # db helpers
-        roadsDb = LayerDbInfo(inRoadsLayer)
-        dbConnName = roadsDb.getConnName()
-        self.roadsTable = roadsDb.getTable()
-        self.schema = roadsDb.getSchema()
+        layerDb = LayerDbInfo(inLayer)
+        dbConnName = layerDb.getConnName()
         dbType = 'postgis'
 
         # get connection to db
         if dbConnName:
-            dbPluginClass = createDbPlugin(dbType,dbConnName)
-            if dbPluginClass:
+            self.dbPluginClass = createDbPlugin(dbType,dbConnName)
+            if self.dbPluginClass:
                 try:
-                    self.dbConnection = dbPluginClass.connect()
-                    self.db = dbPluginClass.database()
+                    self.dbConnection = self.dbPluginClass.connect()
+                    self.db = self.dbPluginClass.database()
                 except BaseError, e:
                     raise GeoAlgorithmExecutionException('Error connecting to \
                         database %s. Exception: %s' % (dbConnName, str(e)))
@@ -126,7 +81,60 @@ class TDGAlgorithm(GeoAlgorithm):
                     database %s' % dbConnName)
         else:
             raise GeoAlgorithmExecutionException('Could not identify database \
-                from layer %s' % roadsLayer.name())
+                from layer %s' % inLayer.name())
+
+
+    # set the reference to the database
+    def setDbFromRoadsLayer(self,inRoadsLayer):
+        # db helpers
+        roadsDb = LayerDbInfo(inRoadsLayer)
+        self.roadsTable = roadsDb.getTable()
+        self.schema = roadsDb.getSchema()
+        self.roadsLayer = inRoadsLayer
+        self.setDbFromLayer(inRoadsLayer)
+
+
+    # assign layers to the various TDG datasets using the roads layer as input
+    def setLayersFromDb(self):
+        if not self.db:
+            GeoAlgorithmExecutionException('Connection to database not set')
+
+        self.intsTable = self.roadsTable + '_intersections'
+        self.vertsTable = self.roadsTable + '_net_vert'
+        self.linksTable = self.roadsTable + '_net_link'
+
+        self.intsLayer = self.db.toSqlLayer(
+            'SELECT * FROM %s.%s' % (self.schema,self.intsTable),
+            'geom',
+            'int_id',
+            self.getUniqueLayerName(self.intsTable),
+            QgsMapLayer.VectorLayer,
+            False
+        )
+        if not (self.intsLayer.isValid()):
+            self.intsLayer = None
+
+        self.vertsLayer = self.db.toSqlLayer(
+            'SELECT * FROM %s.%s' % (self.schema,self.vertsTable),
+            'geom',
+            'vert_id',
+            self.getUniqueLayerName(self.vertsTable),
+            QgsMapLayer.VectorLayer,
+            False
+        )
+        if not (self.vertsLayer.isValid()):
+            self.vertsLayer = None
+
+        self.linksLayer = self.db.toSqlLayer(
+            'SELECT * FROM %s.%s' % (self.schema,self.linksTable),
+            'geom',
+            'link_id',
+            self.getUniqueLayerName(self.linksTable),
+            QgsMapLayer.VectorLayer,
+            False
+        )
+        if not (self.linksLayer.isValid()):
+            self.linksLayer = None
 
 
     def getUniqueLayerName(self,baseName):
@@ -143,26 +151,24 @@ class TDGAlgorithm(GeoAlgorithm):
         return newLayerName
 
 
-    # execute a sql query on the database
-    def executeSql(self,sql):
-        pass
-
+    def setRoadsLayer(self,inLayer):
+        self.roadsLayer = inLayer
 
     # add roads layer to map with styling
     def addRoadsToMap(self):
-        pass
+        QgsMapLayerRegistry.instance().addMapLayer(self.roadsLayer)
 
 
     # add intersections layer to map with styling
     def addIntsToMap(self):
-        pass
+        QgsMapLayerRegistry.instance().addMapLayer(self.intsLayer)
 
 
     # add vertices layer to map with styling
     def addVertsToMap(self):
-        pass
+        QgsMapLayerRegistry.instance().addMapLayer(self.vertsLayer)
 
 
     # add links layer to map with styling
     def addLinksToMap(self):
-        pass
+        QgsMapLayerRegistry.instance().addMapLayer(self.linksLayer)

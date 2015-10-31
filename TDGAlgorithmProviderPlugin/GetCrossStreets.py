@@ -28,18 +28,15 @@ __revision__ = '$Format:%H$'
 from PyQt4.QtCore import QSettings, QVariant
 from qgis.core import QgsDataSourceURI, QgsVectorLayerImport, QGis, QgsFeature, QgsGeometry
 
+from TDGAlgorithm import TDGAlgorithm
 import processing
-from processing.core.GeoAlgorithm import GeoAlgorithm
 from processing.core.GeoAlgorithmExecutionException import GeoAlgorithmExecutionException
 from processing.core.parameters import ParameterVector
 from processing.core.parameters import ParameterBoolean
-
 from processing.tools import dataobjects
-from processing.algs.qgis import postgis_utils
-from dbutils import LayerDbInfo
 
 
-class GetCrossStreets(GeoAlgorithm):
+class GetCrossStreets(TDGAlgorithm):
     """This algorithm takes an input road dataset and calculates
     the traffic stress
     """
@@ -77,29 +74,12 @@ class GetCrossStreets(GeoAlgorithm):
 
         # establish db connection
         progress.setInfo('Getting DB connection')
-        roadsDb = LayerDbInfo(inLayer)
-        dbHost = roadsDb.getHost()
-        dbPort = roadsDb.getPort()
-        dbName = roadsDb.getDBName()
-        dbUser = roadsDb.getUser()
-        dbPass = roadsDb.getPassword()
-        dbSchema = roadsDb.getSchema()
-        dbTable = roadsDb.getTable()
-        dbType = roadsDb.getType()
-        dbSRID = roadsDb.getSRID()
-        try:
-            db = postgis_utils.GeoDB(host=dbHost,
-                                     port=dbPort,
-                                     dbname=dbName,
-                                     user=dbUser,
-                                     passwd=dbPass)
-        except postgis_utils.DbError, e:
-            raise GeoAlgorithmExecutionException(
-                self.tr("Couldn't connect to database:\n%s" % e.message))
+        self.setDbFromRoadsLayer(inLayer)
+
 
         # build the base sql statement
-        baseSql = 'select tdgGenerateCrossStreetData('
-        baseSql = baseSql + "'" + dbSchema + "." + dbTable + "',"
+        baseSql = u'select tdgGenerateCrossStreetData('
+        baseSql = baseSql + "'" + self.schema + "." + self.roadsTable + "',"
 
         # loop through either selected features (if any) or all features (if
         # no selection) and process the cross streets in chunks of 100
@@ -116,38 +96,9 @@ class GetCrossStreets(GeoAlgorithm):
             sql = sql[:-1]                  #remove the last comma
             sql = sql + "}'::INTEGER[])"    #finish the call
             try:
-                db._exec_sql_and_commit(baseSql + sql)
+                self.db.connector._execute_and_commit(baseSql + sql)
                 progress.setPercentage(100*count/len(featureIds))
                 sql = "'{"
                 count = count + 100
             except:
                 raise
-
-        # sql = "'{"
-        # for i in range(len(features)):
-        #     feat = features[i]
-        #     sql = sql + str(feat.id()) + ','
-        #     if (i + 1) % 100 == 0:
-        #         sql = sql[:-1]                  #remove the last comma
-        #         sql = sql + "}::INTEGER[])'"    #finish the call
-        #         try:
-        #             progress.setInfo(baseSql + sql)
-        #             db._exec_sql_and_commit(baseSql + sql)
-        #             progress.setPercentage(i/len(features))
-        #             sql = "'{"
-        #         except:
-        #             raise
-        #
-        #
-        # for feat in inLayer.selectedFeatures():
-        #
-        #
-        #
-        # baseSql = baseSql + ");"
-        #
-        # #processing.runalg("qgis:postgisexecutebaseSql",dbName,baseSql)
-        # progress.setInfo('Calculating stress scores')
-        # try:
-        #     db._exec_sql_and_commit(sql)
-        # except:
-        #     raise

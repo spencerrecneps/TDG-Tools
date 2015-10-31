@@ -59,7 +59,10 @@ class LayerDbInfo:
         self.dbName = str(vals['dbname']).strip("'")
         self.key = str(vals['key']).strip("'")
         self.srid = int(provider.crs().postgisSrid())
-        self.type = str(vals['type'])
+        try:
+            self.type = str(vals['type'])
+        except:
+            pass
         table = vals['table'].split('.')
         self.schemaName = table[0].strip('"')
         self.tableName = table[1].strip('"')
@@ -120,5 +123,3 @@ class LayerDbInfo:
 
     def getTable(self):
         return self.tableName
-
-    

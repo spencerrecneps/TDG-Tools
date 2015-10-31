@@ -28,18 +28,15 @@ __revision__ = '$Format:%H$'
 from PyQt4.QtCore import QSettings, QVariant
 from qgis.core import *
 
+from TDGAlgorithm import TDGAlgorithm
 import processing
-from processing.core.GeoAlgorithm import GeoAlgorithm
 from processing.core.GeoAlgorithmExecutionException import GeoAlgorithmExecutionException
 from processing.core.parameters import ParameterVector
 from processing.core.parameters import ParameterBoolean
-
 from processing.tools import dataobjects
-from processing.algs.qgis import postgis_utils
-from dbutils import LayerDbInfo
 
 
-class MakeRoadNetwork(GeoAlgorithm):
+class MakeRoadNetwork(TDGAlgorithm):
     """This algorithm takes an input road dataset and adds
     the necessary tables and database triggers to maintain
     a routable network.
@@ -51,6 +48,7 @@ class MakeRoadNetwork(GeoAlgorithm):
 
     ROADS_LAYER = 'ROADS_LAYER'
     ADDTOMAP = 'ADDTOMAP'
+
 
     def defineCharacteristics(self):
         """Here we define the inputs and output of the algorithm, along
@@ -73,59 +71,28 @@ class MakeRoadNetwork(GeoAlgorithm):
         self.addParameter(ParameterBoolean(self.ADDTOMAP,
             self.tr('Add new tables to map'), True))
 
+
     def processAlgorithm(self, progress):
         # Retrieve the values of the parameters entered by the user
         inLayer = dataobjects.getObjectFromUri(self.getParameterValue(self.ROADS_LAYER))
         addToMap = self.getParameterValue(self.ADDTOMAP)
 
         # establish db connection
-        roadsDb = LayerDbInfo(inLayer)
-        dbHost = roadsDb.getHost()
-        dbPort = roadsDb.getPort()
-        dbName = roadsDb.getDBName()
-        dbUser = roadsDb.getUser()
-        dbPass = roadsDb.getPassword()
-        dbSchema = roadsDb.getSchema()
-        dbTable = roadsDb.getTable()
-        dbType = roadsDb.getType()
-        dbSRID = roadsDb.getSRID()
-        try:
-            db = postgis_utils.GeoDB(host=dbHost,
-                                     port=dbPort,
-                                     dbname=dbName,
-                                     user=dbUser,
-                                     passwd=dbPass)
-        except postgis_utils.DbError, e:
-            raise GeoAlgorithmExecutionException(
-                self.tr("Couldn't connect to database:\n%s" % e.message))
+        progress.setInfo('Getting DB connection')
+        self.setDbFromRoadsLayer(inLayer)
+        self.setLayersFromDb()
 
         #sql = 'select tdgMakeNetwork('
         #sql = sql + "'" + roadsDb.getTable() + "');"
-        sql = "select tdgMakeNetwork('%s.%s');" % (dbSchema, dbTable)
+        sql = "select tdgMakeNetwork('%s.%s');" % (self.schema, self.roadsTable)
         progress.setInfo('Creating network')
         try:
-            db._exec_sql_and_commit(sql)
+            self.db.connector._execute_and_commit(sql)
         except:
             raise
-        #processing.runalg("qgis:postgisexecutesql",dbName,sql)
-
 
         # add layers to map
         if addToMap:
-            linkName = dbTable + '_net_link'
-            vertName = dbTable + '_net_vert'
-            uri = QgsDataSourceURI()
-            uri.setConnection(dbHost,str(dbPort),dbName,dbUser,dbPass)
-            uri.setSrid(str(dbSRID))
-
-            # link table
-            uri.setDataSource(dbSchema,linkName,'geom','','id')
-            uri.setWkbType(QGis.WKBLineString)
-            layer = QgsVectorLayer(uri.uri(),linkName,'postgres')
-            QgsMapLayerRegistry.instance().addMapLayer(layer)
-
-            # vert table
-            uri.setDataSource(dbSchema,vertName,'geom','','id')
-            uri.setWkbType(QGis.WKBPoint)
-            layer = QgsVectorLayer(uri.uri(),vertName,'postgres')
-            QgsMapLayerRegistry.instance().addMapLayer(layer)
+            self.setLayersFromDb()
+            self.addLinksToMap()
+            self.addVertsToMap()
