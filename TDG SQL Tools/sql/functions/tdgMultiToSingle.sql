@@ -40,6 +40,12 @@ BEGIN
     INTO    cols;
     cols_text := array_to_string(array_remove(cols, geom_column_),',');
 
+    -- add tdg_id column
+    EXECUTE '
+        ALTER TABLE '||input_table_||'
+        ADD COLUMN tdg_id TEXT NOT NULL DEFAULT uuid_generate_v4()::TEXT;
+    ';
+
     -- copy back to input_table_
     EXECUTE '
         INSERT INTO '||input_table_||' (geom,'||cols_text||')
