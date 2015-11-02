@@ -26,87 +26,25 @@ __copyright__ = '(C) 2015, Spencer Gardner'
 __revision__ = '$Format:%H$'
 
 import networkx as nx
-import re
 from qgis.core import *
-from dbutils import LayerDbInfo, isDbTable
 from processing.tools import vector
 from processing.core.GeoAlgorithmExecutionException import GeoAlgorithmExecutionException
-from db_manager.db_plugins import createDbPlugin
-from db_manager.db_plugins.plugin import DBPlugin, Schema, Table, BaseError
 
 class NXUtils:
-    def __init__(self, roadsLayer):
+    def __init__(self, vertsLayer, linksLayer):
         # layers
-        self.vertLayer = None
-        self.linkLayer = None
-
-        # db helpers
-        roadsDb = LayerDbInfo(roadsLayer)
-        dbConnName = roadsDb.getConnName()
-        dbTable = roadsDb.getTable()
-        dbSchema = roadsDb.getSchema()
-        dbType = 'postgis'
-        connection = None
-
-        # get connection to db
-        if dbConnName:
-            dbPluginClass = createDbPlugin(dbType,dbConnName)
-            if dbPluginClass:
-                try:
-                    connection = dbPluginClass.connect()
-                except BaseError, e:
-                    raise GeoAlgorithmExecutionException('Error connecting to \
-                        database %s. Exception: %s' % (dbConnNamem, e))
-            else:
-                raise GeoAlgorithmExecutionException('Error connecting to \
-                    database %s' % dbConnName)
-        else:
-            raise GeoAlgorithmExecutionException('Could not identify database \
-                from layer %s' % roadsLayer.name())
-
-        # get network layers
-        if connection:
-            db = dbPluginClass.database()
-            if db:
-                vertTable = dbTable + '_net_vert'
-                linkTable = dbTable + '_net_link'
-
-                self.vertLayer = db.toSqlLayer(
-                    'SELECT * FROM %s.%s' % (dbSchema,vertTable),
-                    'geom',
-                    'vert_id',
-                    roadsDb.getUniqueLayerName(vertTable),
-                    QgsMapLayer.VectorLayer,
-                    False
-                )
-
-                self.linkLayer = db.toSqlLayer(
-                    'SELECT * FROM %s.%s' % (dbSchema,linkTable),
-                    'geom',
-                    'link_id',
-                    roadsDb.getUniqueLayerName(linkTable),
-                    QgsMapLayer.VectorLayer,
-                    False
-                )
-
-                # raise error if couldn't load network tables
-                if not (self.vertLayer.isValid() and self.linkLayer.isValid()):
-                    raise GeoAlgorithmExecutionException('Could not load \
-                        tables %s and %s. Check to make sure %s has a \
-                        network built.' % (vertTable,linkTable,roadsLayer.name()))
-            else:
-                raise GeoAlgorithmExecutionException('Database not found \
-                    for layer %s' % roadsLayer.name())
-        else:
-            raise GeoAlgorithmExecutionException('Error connecting to \
-                database %s' % dbConnName)
+        self.vertsLayer = vertsLayer
+        self.linksLayer = linksLayer
+        if self.vertsLayer is None or self.linksLayer is None:
+            raise GeoAlgorithmExecutionException('Could not identify \
+                vertex and link layers. Were network tables created in PostGIS?')
 
         # other vars
         self.DG = nx.DiGraph()
 
     def buildNetwork(self):
         # edges
-        edges = vector.values(self.linkLayer,
+        edges = vector.values(self.linksLayer,
                                 'source_vert',
                                 'target_vert',
                                 'link_cost',
@@ -123,7 +61,7 @@ class NXUtils:
                         road_id=edges['road_id'][i])
 
         # vertices
-        verts = vector.values(self.vertLayer,
+        verts = vector.values(self.vertsLayer,
                                 'vert_id',
                                 'vert_cost',
                                 'int_id')

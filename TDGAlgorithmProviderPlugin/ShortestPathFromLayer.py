@@ -29,7 +29,7 @@ from PyQt4.QtCore import QSettings, QVariant
 from qgis.core import *
 
 import processing
-from processing.core.GeoAlgorithm import GeoAlgorithm
+from TDGAlgorithm import TDGAlgorithm
 from processing.core.GeoAlgorithmExecutionException import GeoAlgorithmExecutionException
 from processing.core.parameters import ParameterVector
 from processing.core.parameters import ParameterString
@@ -40,12 +40,11 @@ from processing.core.outputs import OutputVector
 
 from processing.tools import dataobjects, vector
 from processing.algs.qgis import postgis_utils
-from dbutils import LayerDbInfo
 from nxutils import NXUtils
 
 import networkx as nx
 
-class ShortestPathFromLayer(GeoAlgorithm):
+class ShortestPathFromLayer(TDGAlgorithm):
     """This algorithm takes an input road network and
     an origin-destination intersection pair and finds
     the shortest path between the two.
@@ -129,30 +128,13 @@ class ShortestPathFromLayer(GeoAlgorithm):
         progress.setPercentage(2)
 
         # establish db connection
-        roadsDb = LayerDbInfo(roadsLayer)
-        dbHost = roadsDb.getHost()
-        dbPort = roadsDb.getPort()
-        dbName = roadsDb.getDBName()
-        dbUser = roadsDb.getUser()
-        dbPass = roadsDb.getPassword()
-        dbSchema = roadsDb.getSchema()
-        dbTable = roadsDb.getTable()
-        dbType = roadsDb.getType()
-        dbSRID = roadsDb.getSRID()
-        try:
-            db = postgis_utils.GeoDB(host=dbHost,
-                                     port=dbPort,
-                                     dbname=dbName,
-                                     user=dbUser,
-                                     passwd=dbPass)
-        except postgis_utils.DbError, e:
-            raise GeoAlgorithmExecutionException(
-                self.tr("Couldn't connect to database:\n%s" % e.message))
-        progress.setPercentage(3)
+        progress.setInfo('Getting DB connection')
+        self.setDbFromRoadsLayer(roadsLayer)
+        self.setLayersFromDb()
 
         # get network
         progress.setInfo('Building network')
-        nu = NXUtils(roadsLayer)
+        nu = NXUtils(self.vertsLayer,self.linksLayer)
         nu.buildNetwork()
         DG = nu.getNetwork()
         progress.setPercentage(10)

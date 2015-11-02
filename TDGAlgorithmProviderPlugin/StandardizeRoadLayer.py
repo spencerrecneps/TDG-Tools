@@ -37,7 +37,6 @@ from processing.core.parameters import ParameterTableField
 from processing.core.parameters import ParameterBoolean
 from processing.core.parameters import ParameterSelection
 from processing.tools import dataobjects
-from dbutils import LayerDbInfo
 
 
 class StandardizeRoadLayer(TDGAlgorithm):

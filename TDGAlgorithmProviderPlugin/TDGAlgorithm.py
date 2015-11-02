@@ -31,10 +31,8 @@ from qgis.core import *
 import processing
 from processing.core.GeoAlgorithm import GeoAlgorithm
 from processing.core.GeoAlgorithmExecutionException import GeoAlgorithmExecutionException
-
 from processing.tools import dataobjects
-from processing.algs.qgis import postgis_utils
-from dbutils import LayerDbInfo
+#from processing.algs.qgis import postgis_utils
 
 from db_manager.db_plugins import createDbPlugin
 from db_manager.db_plugins.plugin import DBPlugin, Schema, Table, BaseError
@@ -53,6 +51,7 @@ class TDGAlgorithm(GeoAlgorithm):
     vertsTable = None
     linksLayer = None
     linksTable = None
+    dbConnName = None
     dbPluginClass = None
     dbConnection = None
     db = None
@@ -62,23 +61,22 @@ class TDGAlgorithm(GeoAlgorithm):
     # set the reference to the database
     def setDbFromLayer(self,inLayer):
         # db helpers
-        layerDb = LayerDbInfo(inLayer)
-        dbConnName = layerDb.getConnName()
+        self.setDbConnName(inLayer)
         dbType = 'postgis'
 
         # get connection to db
-        if dbConnName:
-            self.dbPluginClass = createDbPlugin(dbType,dbConnName)
+        if self.dbConnName:
+            self.dbPluginClass = createDbPlugin(dbType,self.dbConnName)
             if self.dbPluginClass:
                 try:
                     self.dbConnection = self.dbPluginClass.connect()
                     self.db = self.dbPluginClass.database()
                 except BaseError, e:
                     raise GeoAlgorithmExecutionException('Error connecting to \
-                        database %s. Exception: %s' % (dbConnName, str(e)))
+                        database %s. Exception: %s' % (self.dbConnName, str(e)))
             else:
                 raise GeoAlgorithmExecutionException('Error connecting to \
-                    database %s' % dbConnName)
+                    database %s' % self.dbConnName)
         else:
             raise GeoAlgorithmExecutionException('Could not identify database \
                 from layer %s' % inLayer.name())
@@ -87,9 +85,9 @@ class TDGAlgorithm(GeoAlgorithm):
     # set the reference to the database
     def setDbFromRoadsLayer(self,inRoadsLayer):
         # db helpers
-        roadsDb = LayerDbInfo(inRoadsLayer)
-        self.roadsTable = roadsDb.getTable()
-        self.schema = roadsDb.getSchema()
+        uri = QgsDataSourceURI(inRoadsLayer.source())
+        self.roadsTable = uri.table()
+        self.schema = uri.schema()
         self.roadsLayer = inRoadsLayer
         self.setDbFromLayer(inRoadsLayer)
 
@@ -149,6 +147,31 @@ class TDGAlgorithm(GeoAlgorithm):
             newLayerName = u"%s_%d" % (baseName, i)
 
         return newLayerName
+
+
+    def setDbConnName(self,inLayer):
+        # get db details by
+        # searching qgis db connections for a match to the layer
+        if not inLayer.providerType() == u'postgres':
+            raise GeoAlgorithmExecutionException('Layer %s is not stored in a PostGIS database' % inLayer.name())
+
+        # get the name of the db from the uri
+        uri = QgsDataSourceURI(inLayer.source())
+        dbName = uri.database()
+
+        settings = QSettings()
+        settings.beginGroup('/PostgreSQL/connections/')
+        try:
+            for conn in settings.childGroups():
+                if settings.value(conn + '/database') == dbName:
+                    self.dbConnName = conn
+        except Exception, e:
+            raise GeoAlgorithmExecutionException('Unspecified error reading \
+                    database connections: %s' % e)
+
+        if not self.dbConnName:
+            raise GeoAlgorithmExecutionException('No stored database connection \
+                    identified for layer %s' % inLayer.name())
 
 
     def setRoadsLayer(self,inLayer):

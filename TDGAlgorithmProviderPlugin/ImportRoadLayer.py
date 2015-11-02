@@ -25,26 +25,22 @@ __copyright__ = '(C) 2015, Spencer Gardner'
 
 __revision__ = '$Format:%H$'
 
-import string
-import random
 from PyQt4.QtCore import QSettings
 from qgis.core import *
-#from qgis.utils import iface
 
 import processing
-from processing.core.GeoAlgorithm import GeoAlgorithm
+from TDGAlgorithm import TDGAlgorithm
 from processing.core.GeoAlgorithmExecutionException import GeoAlgorithmExecutionException
 from processing.core.parameters import ParameterVector
 from processing.core.parameters import ParameterString
 from processing.core.parameters import ParameterCrs
 from processing.core.parameters import ParameterBoolean
 from processing.core.parameters import ParameterSelection
-
 from processing.tools import dataobjects, vector
 from processing.algs.qgis import postgis_utils
 
 
-class ImportRoadLayer(GeoAlgorithm):
+class ImportRoadLayer(TDGAlgorithm):
     """This algorithm takes an input road dataset and
     uploads it to a PostGIS database for use in stress analysis
     and other tasks.
@@ -115,7 +111,7 @@ class ImportRoadLayer(GeoAlgorithm):
     def processAlgorithm(self, progress):
         # Retrieve the values of the parameters entered by the user
         # roads layer
-        roadsLayer = dataobjects.getObjectFromUri(self.getParameterValue(self.ROADS_LAYER))
+        inLayer = dataobjects.getObjectFromUri(self.getParameterValue(self.ROADS_LAYER))
 
         # db connection
         connection = self.DB_CONNECTIONS[self.getParameterValue(self.DATABASE)]
@@ -137,11 +133,10 @@ class ImportRoadLayer(GeoAlgorithm):
         # table name
         table = self.getParameterValue(self.TABLENAME).strip().lower()
         if table is None or len(table) < 1:
-            table = roadsLayer.name().lower()
+            table = inLayer.name().lower()
         table.replace(' ', '')
 
         # test connection
-        providerName = 'postgres'
         try:
             db = postgis_utils.GeoDB(host=host, port=port, dbname=database,
                                      user=username, passwd=password)
@@ -164,49 +159,51 @@ class ImportRoadLayer(GeoAlgorithm):
         ##########################
         # And now we can process #
         ##########################
-        #linestrings = processing.runalg('qgis:multiparttosingleparts')
-
         # first create the schema if it doesn't exist
         progress.setInfo('Creating schema ' + schema + ' (if necessary)')
         processing.runalg("qgis:postgisexecutesql",connection,
             "CREATE SCHEMA IF NOT EXISTS " + schema)
         progress.setPercentage(5)
 
-        # set up the temporary table and import the raw data
-        tempTableName = ''.join(random.sample(string.lowercase,10))
-        progress.setInfo('Importing to temporary table: ' + tempTableName)
-        #processing.runalg("qgis:importintopostgis",database,tempTableName,schema,
-        #    roadsLayer,False,True,'geom',True,True,None)
-        processing.runalg("qgis:importintopostgis",roadsLayer,
-            self.getParameterValue(self.DATABASE),schema,tempTableName,
-            None,'geom',False,True,True,True)
-        progress.setPercentage(60)
-
-        # move the temp table to its final location
-        # need to parse the crsId to get rid of the EPSG: part
-        progress.setInfo('Cleaning and finalizing table as: ' + table)
-        processing.runalg("qgis:postgisexecutesql",connection,
-            "SELECT tdgMultiToSingle(\'" + tempTableName + "\',\
-                \'" + table + "\',\
-                \'" + schema + "\',\
-                " + str(pgSrid) + ",\
-                " + str(overwrite) + ")")
-        progress.setPercentage(90)
-
-        progress.setInfo('Analyzing table ' + table)
-        processing.runalg("qgis:postgisexecutesql",connection,
-            "ANALYZE " + schema + "." + table)
-        progress.setPercentage(99)
-
-        # set up the new table's uri
+        # set up connection to the db
         uri = QgsDataSourceURI()
         uri.setConnection(host, str(port), database, username, password)
-
         uri.setDataSource(schema, table, 'geom', '', 'id')
-        uri.setSrid(str(pgSrid))
-        uri.setWkbType(QGis.WKBLineString)
 
-        # add new table to map
+        # set import options
+        options = {}
+        options['forceSinglePartGeometryType'] = False #True
+        if overwrite:
+            options['overwrite'] = True
+
+        # import the table
+        try:
+            ret, errMsg = QgsVectorLayerImport.importLayer(
+                inLayer,
+                uri.uri(),
+                'postgres',
+                targetCrs,
+                onlySelected=False, # only selected features
+                skipAttributeCreation=False,
+                options=options
+            )
+        except Exception as e:
+            ret = -1
+            errMsg = unicode(e)
+
+        if ret != 0:
+            raise GeoAlgorithmExecutionException('Failure during import: %s' % errMsg)
+
+        # connect to the database
+        dbLayer = QgsVectorLayer(uri.uri(),table,'postgres')
+        self.setDbFromLayer(dbLayer)
+        sql = "SELECT tdg.tdgMultiToSingle('%s.%s','geom')" % (schema,table)
+        try:
+            self.db.connector._execute_and_commit(sql)
+        except Exception, e:
+            raise GeoAlgorithmExecutionException('Error converting from multi to single: %s' % e)
+
         if addToMap:
-            layer = QgsVectorLayer(uri.uri(),table,'postgres')
-            QgsMapLayerRegistry.instance().addMapLayer(layer)
+            uri.setWkbType(QGis.WKBLineString)
+            self.setRoadsLayer(QgsVectorLayer(uri.uri(),table,'postgres'))
+            self.addRoadsToMap()
