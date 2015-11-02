@@ -26,57 +26,25 @@ __copyright__ = '(C) 2015, Spencer Gardner'
 __revision__ = '$Format:%H$'
 
 import networkx as nx
-import re
 from qgis.core import *
-from dbutils import LayerDbInfo, isDbTable
 from processing.tools import vector
 from processing.core.GeoAlgorithmExecutionException import GeoAlgorithmExecutionException
 
 class NXUtils:
-    def __init__(self, roadsLayer):
-        # establish db connection
-        roadsDb = LayerDbInfo(roadsLayer)
-        dbHost = roadsDb.getHost()
-        dbPort = roadsDb.getPort()
-        dbName = roadsDb.getDBName()
-        dbUser = roadsDb.getUser()
-        dbPass = roadsDb.getPassword()
-        dbSchema = roadsDb.getSchema()
-        dbTable = roadsDb.getTable()
-        dbType = roadsDb.getType()
-        dbSRID = roadsDb.getSRID()
-
-        if self.isNetwork():  # need to test for existence of network layers
-            pass
-        else:
-            raise GeoAlgorithmExecutionException('No network layer found for \
-                    table %s' % dbTable)
-
-        # create verts layer
-        uri = QgsDataSourceURI()
-        self.vertTable = dbTable + '_net_vert'
-        uri.setConnection(dbHost,str(dbPort),dbName,dbUser,dbPass)
-        uri.setDataSource(dbSchema,self.vertTable,'geom','','vert_id')
-        uri.setWkbType(QGis.WKBPoint)
-        self.vertLayer = QgsVectorLayer(uri.uri(),self.vertTable,'postgres')
-
-        # create links layer
-        self.linkTable = dbTable + '_net_link'
-        uri.setConnection(dbHost,str(dbPort),dbName,dbUser,dbPass)
-        uri.setDataSource(dbSchema,self.linkTable,'geom','','link_id')
-        uri.setWkbType(QGis.WKBLineString)
-        self.linkLayer = QgsVectorLayer(uri.uri(),self.linkTable,'postgres')
+    def __init__(self, vertsLayer, linksLayer):
+        # layers
+        self.vertsLayer = vertsLayer
+        self.linksLayer = linksLayer
+        if self.vertsLayer is None or self.linksLayer is None:
+            raise GeoAlgorithmExecutionException('Could not identify \
+                vertex and link layers. Were network tables created in PostGIS?')
 
         # other vars
         self.DG = nx.DiGraph()
 
-
-    def isNetwork(self):
-        return True
-
     def buildNetwork(self):
         # edges
-        edges = vector.values(self.linkLayer,
+        edges = vector.values(self.linksLayer,
                                 'source_vert',
                                 'target_vert',
                                 'link_cost',
@@ -93,7 +61,7 @@ class NXUtils:
                         road_id=edges['road_id'][i])
 
         # vertices
-        verts = vector.values(self.vertLayer,
+        verts = vector.values(self.vertsLayer,
                                 'vert_id',
                                 'vert_cost',
                                 'int_id')

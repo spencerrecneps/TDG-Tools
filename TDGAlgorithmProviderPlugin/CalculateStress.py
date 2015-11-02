@@ -28,18 +28,15 @@ __revision__ = '$Format:%H$'
 from PyQt4.QtCore import QSettings, QVariant
 from qgis.core import QgsDataSourceURI, QgsVectorLayerImport, QGis, QgsFeature, QgsGeometry
 
+from TDGAlgorithm import TDGAlgorithm
 import processing
-from processing.core.GeoAlgorithm import GeoAlgorithm
 from processing.core.GeoAlgorithmExecutionException import GeoAlgorithmExecutionException
 from processing.core.parameters import ParameterVector
 from processing.core.parameters import ParameterBoolean
-
 from processing.tools import dataobjects
-from processing.algs.qgis import postgis_utils
-from dbutils import LayerDbInfo
 
 
-class CalculateStress(GeoAlgorithm):
+class CalculateStress(TDGAlgorithm):
     """This algorithm takes an input road dataset and calculates
     the traffic stress
     """
@@ -88,27 +85,11 @@ class CalculateStress(GeoAlgorithm):
         inLayer = dataobjects.getObjectFromUri(self.getParameterValue(self.ROADS_LAYER))
 
         # establish db connection
-        roadsDb = LayerDbInfo(inLayer)
-        dbHost = roadsDb.getHost()
-        dbPort = roadsDb.getPort()
-        dbName = roadsDb.getDBName()
-        dbUser = roadsDb.getUser()
-        dbPass = roadsDb.getPassword()
-        dbSchema = roadsDb.getSchema()
-        dbType = roadsDb.getType()
-        dbSRID = roadsDb.getSRID()
-        try:
-            db = postgis_utils.GeoDB(host=dbHost,
-                                     port=dbPort,
-                                     dbname=dbName,
-                                     user=dbUser,
-                                     passwd=dbPass)
-        except postgis_utils.DbError, e:
-            raise GeoAlgorithmExecutionException(
-                self.tr("Couldn't connect to database:\n%s" % e.message))
+        progress.setInfo('Getting DB connection')
+        self.setDbFromRoadsLayer(inLayer)
 
-        sql = 'select tdgCalculateStress('
-        sql = sql + "'" + roadsDb.getTable() + "'"
+        sql = u'select tdgCalculateStress('
+        sql = sql + "'" + self.roadsTable + "'"
         if self.SEGMENT:
             sql = sql + ",'t'"
         else:
@@ -126,6 +107,6 @@ class CalculateStress(GeoAlgorithm):
         #processing.runalg("qgis:postgisexecutesql",dbName,sql)
         progress.setInfo('Calculating stress scores')
         try:
-            db._exec_sql_and_commit(sql)
+            self.db.connector._execute_and_commit(sql)
         except:
             raise

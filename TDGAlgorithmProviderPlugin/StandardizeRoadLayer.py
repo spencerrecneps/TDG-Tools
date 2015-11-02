@@ -28,21 +28,18 @@ __revision__ = '$Format:%H$'
 from PyQt4.QtCore import QSettings
 from qgis.core import *
 
+from TDGAlgorithm import TDGAlgorithm
 import processing
-from processing.core.GeoAlgorithm import GeoAlgorithm
 from processing.core.GeoAlgorithmExecutionException import GeoAlgorithmExecutionException
 from processing.core.parameters import ParameterVector
 from processing.core.parameters import ParameterString
 from processing.core.parameters import ParameterTableField
 from processing.core.parameters import ParameterBoolean
 from processing.core.parameters import ParameterSelection
-
 from processing.tools import dataobjects
-from processing.algs.qgis import postgis_utils
-from dbutils import LayerDbInfo
 
 
-class StandardizeRoadLayer(GeoAlgorithm):
+class StandardizeRoadLayer(TDGAlgorithm):
     """This algorithm takes an input road dataset and converts
     it into a standardized format for use in stress analysis
     and other tasks.
@@ -180,30 +177,15 @@ class StandardizeRoadLayer(GeoAlgorithm):
         delSource = self.getParameterValue(self.DELETE_SOURCE)
 
         # establish db connection
-        roadsDb = LayerDbInfo(inLayer)
-        dbHost = roadsDb.getHost()
-        dbPort = roadsDb.getPort()
-        dbName = roadsDb.getDBName()
-        dbUser = roadsDb.getUser()
-        dbPass = roadsDb.getPassword()
-        dbSchema = roadsDb.getSchema()
-        dbTable = roadsDb.getTable()
-        dbType = roadsDb.getType()
-        dbSRID = roadsDb.getSRID()
-        try:
-            db = postgis_utils.GeoDB(host=dbHost,
-                                     port=dbPort,
-                                     dbname=dbName,
-                                     user=dbUser,
-                                     passwd=dbPass)
-        except postgis_utils.DbError, e:
-            raise GeoAlgorithmExecutionException(
-                self.tr("Couldn't connect to database:\n%s" % e.message))
+        progress.setInfo('Getting DB connection')
+        self.setDbFromLayer(inLayer)
+        layerDb = LayerDbInfo(inLayer)
+        inTable = layerDb.getSchema() + "." + layerDb.getTable()
 
         # first create the new road table
         progress.setInfo('Creating standardized road layer')
-        sql = 'select tdg.tdgMakeStandardizedRoadLayer('
-        sql = sql + "'" + dbTable + "',"
+        sql = u'select tdg.tdgMakeStandardizedRoadLayer('
+        sql = sql + "'" + inTable + "',"
         sql = sql + "'" + schema + "',"
         sql = sql + "'" + tableName + "',"
         if overwrite:
@@ -211,7 +193,7 @@ class StandardizeRoadLayer(GeoAlgorithm):
         else:
             sql = sql + "'f')"
         try:
-            db._exec_sql_and_commit(sql)
+            self.db.connector._execute_and_commit(sql)
         except:
             raise
         progress.setPercentage(3)
@@ -221,8 +203,8 @@ class StandardizeRoadLayer(GeoAlgorithm):
         progress.setInfo('Copying features')
 
         # first construct the base sql call
-        baseSql = 'select tdg.tdgInsertStandardizedRoad('
-        baseSql = baseSql + "'" + dbTable + "',"
+        baseSql = u'select tdg.tdgInsertStandardizedRoad('
+        baseSql = baseSql + "'" + inTable + "',"
         baseSql = baseSql + "'" + schema + '.' + tableName + "',"
         if fieldIdOrig is None:
             baseSql = baseSql + 'NULL,'
@@ -272,7 +254,7 @@ class StandardizeRoadLayer(GeoAlgorithm):
             sql = sql[:-1]                  #remove the last comma
             sql = sql + "}'::INTEGER[])"    #finish the call
             try:
-                db._exec_sql_and_commit(baseSql + sql)
+                self.db.connector._execute_and_commit(baseSql + sql)
                 progress.setPercentage(3+20*count/len(featureIds))
                 sql = "'{"
                 count = count + 1000
@@ -280,70 +262,67 @@ class StandardizeRoadLayer(GeoAlgorithm):
                 raise
 
         # create the indexes
-        sql = 'select tdgMakeStandardizedRoadIndexes('
+        sql = u'select tdgMakeStandardizedRoadIndexes('
         sql = sql + "'" + schema + '.' + tableName + "')"
         try:
-            db._exec_sql_and_commit(sql)
+            self.db.connector._execute_and_commit(sql)
         except:
             raise
         progress.setPercentage(26)
 
         # create the roads layer
         progress.setInfo('Creating road layer')
-        uri = QgsDataSourceURI()
-        uri.setConnection(dbHost,str(dbPort),dbName,dbUser,dbPass)
-        uri.setDataSource(schema,tableName,'geom','','road_id')
-        uri.setSrid(str(dbSRID))
-        uri.setWkbType(QGis.WKBLineString)
-        roadLayer = QgsVectorLayer(uri.uri(),tableName,'postgres')
+        self.roadsLayer = self.db.toSqlLayer(
+            'SELECT * FROM %s.%s' % (schema,tableName),
+            'geom',
+            'road_id',
+            self.getUniqueLayerName(tableName),
+            QgsMapLayer.VectorLayer,
+            False
+        )
+        if not (self.roadsLayer.isValid()):
+            raise GeoAlgorithmExecutionException('Could not identify new road layer')
 
         # create the intersection table
         progress.setInfo('Creating intersection table')
-        sql = 'select tdgMakeIntersectionTable('
+        sql = u'select tdgMakeIntersectionTable('
         sql = sql + "'" + schema + '.' + tableName + "')"
         try:
-            db._exec_sql_and_commit(sql)
+            self.db.connector._execute_and_commit(sql)
         except:
             raise
         progress.setPercentage(28)
+        self.setLayersFromDb()
 
         # add intersections to the intersection table
         progress.setInfo('Adding intersections')
-        sql = 'select tdgInsertIntersections('
-        sql = sql + "'" + schema + '.' + tableName + "_intersections',"
-        sql = sql + "'" + schema + '.' + tableName + "')"
+        sql = u'select tdgInsertIntersections('
+        sql = sql + "'" + self.intsTable + "',"
+        sql = sql + "'" + self.roadsTable + "')"
         try:
-            db._exec_sql_and_commit(sql)
+            self.db.connector._execute_and_commit(sql)
         except:
             raise
         progress.setPercentage(40)
 
         # create indexes on intersections table
         progress.setInfo('Adding indexes')
-        sql = 'select tdgMakeIntersectionIndexes('
-        sql = sql + "'" + schema + '.' + tableName + "_intersections')"
+        sql = u'select tdgMakeIntersectionIndexes('
+        sql = sql + "'" + self.intsTable + "')"
         try:
-            db._exec_sql_and_commit(sql)
+            self.db.connector._execute_and_commit(sql)
         except:
             raise
         progress.setPercentage(43)
 
-        # create intersection layer
-        progress.setInfo('Creating intersection layer')
-        intTableName = tableName + '_intersections'
-        uri.setConnection(dbHost,str(dbPort),dbName,dbUser,dbPass)
-        uri.setDataSource(schema,intTableName,'geom','','int_id')
-        uri.setWkbType(QGis.WKBPoint)
-        intLayer = QgsVectorLayer(uri.uri(),intTableName,'postgres')
-
         # loop through road features and process their intersection info
         # in chunks of 1000
         progress.setInfo('Adding intersection data to roads')
-        featureIds = roadLayer.allFeatureIds()
+        featureIds = self.roadsLayer.allFeatureIds()
         progress.setInfo('  Processing ' + str(len(featureIds)) + ' road features')
-        baseSql = 'select tdgSetRoadIntersections('
-        baseSql = baseSql + "'" + schema + '.' + tableName + "_intersections',"
-        baseSql = baseSql + "'" + schema + '.' + tableName + "',"
+        baseSql = u'select tdgSetRoadIntersections('
+        baseSql = baseSql + "'" + self.intsTable + "',"
+        baseSql = baseSql + "'" + self.roadsTable + "',"
         chunks = [featureIds[i:i+1000] for i in range(0, len(featureIds), 1000)]
         count = 1000
         for chunk in chunks:
@@ -353,7 +332,7 @@ class StandardizeRoadLayer(GeoAlgorithm):
             sql = sql[:-1]                  #remove the last comma
             sql = sql + "}'::INTEGER[])"    #finish the call
             try:
-                db._exec_sql_and_commit(baseSql + sql)
+                self.db.connector._execute_and_commit(baseSql + sql)
                 progress.setPercentage(43+48*count/len(featureIds))
                 sql = "'{"
                 count = count + 1000
@@ -362,11 +341,11 @@ class StandardizeRoadLayer(GeoAlgorithm):
 
         # loop through intersection features and set the count of legs
         progress.setInfo('Calculating intersection legs')
-        featureIds = intLayer.allFeatureIds()
+        featureIds = self.intsLayer.allFeatureIds()
         progress.setInfo('  Processing ' + str(len(featureIds)) + ' intersection features')
-        baseSql = 'select tdgSetIntersectionLegs('
-        baseSql = baseSql + "'" + schema + '.' + tableName + "_intersections',"
-        baseSql = baseSql + "'" + schema + '.' + tableName + "',"
+        baseSql = u'select tdgSetIntersectionLegs('
+        baseSql = baseSql + "'" + self.intsTable + "',"
+        baseSql = baseSql + "'" + self.roadsTable + "',"
         chunks = [featureIds[i:i+1000] for i in range(0, len(featureIds), 1000)]
         count = 1000
         for chunk in chunks:
@@ -376,7 +355,7 @@ class StandardizeRoadLayer(GeoAlgorithm):
             sql = sql[:-1]                  #remove the last comma
             sql = sql + "}'::INTEGER[])"    #finish the call
             try:
-                db._exec_sql_and_commit(baseSql + sql)
+                self.db.connector._execute_and_commit(baseSql + sql)
                 progress.setPercentage(91+7*count/len(featureIds))
                 sql = "'{"
                 count = count + 1000
@@ -385,22 +364,22 @@ class StandardizeRoadLayer(GeoAlgorithm):
 
         # set intersection triggers
         progress.setInfo('Adding intersection triggers')
-        sql = 'select tdgMakeIntersectionTriggers('
-        sql = sql + "'" + schema + '.' + tableName + "_intersections',"
-        sql = sql + "'" + tableName + "')"
+        sql = u'select tdgMakeIntersectionTriggers('
+        sql = sql + "'" + self.intsTable + "',"
+        sql = sql + "'" + self.roadsTable + "')"
         try:
-            db._exec_sql_and_commit(sql)
+            self.db.connector._execute_and_commit(sql)
         except:
             raise
         progress.setPercentage(99)
 
         # set road triggers
         progress.setInfo('Adding road triggers')
-        sql = 'select tdgMakeRoadTriggers('
-        sql = sql + "'" + schema + '.' + tableName + "',"
+        sql = u'select tdgMakeRoadTriggers('
+        sql = sql + "'" + self.roadsTable + "',"
         sql = sql + "'" + tableName + "')"
         try:
-            db._exec_sql_and_commit(sql)
+            self.db.connector._execute_and_commit(sql)
         except:
             raise
         progress.setPercentage(100)
@@ -408,5 +387,5 @@ class StandardizeRoadLayer(GeoAlgorithm):
         # add layers to map
         mapReg = QgsMapLayerRegistry.instance()
         if addToMap:
-            mapReg.addMapLayer(roadLayer)
-            mapReg.addMapLayer(intLayer)
+            self.addRoadsToMap()
+            self.addIntsToMap()
