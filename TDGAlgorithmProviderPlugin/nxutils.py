@@ -73,9 +73,3 @@ class NXUtils:
 
     def getNetwork(self):
         return self.DG
-
-    def getVertLayer(self):
-        return self.vertLayer
-
-    def getLinkLayer(self):
-        return self.linkLayer

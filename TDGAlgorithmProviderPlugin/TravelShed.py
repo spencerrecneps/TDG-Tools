@@ -25,11 +25,11 @@ __copyright__ = '(C) 2015, Spencer Gardner'
 
 __revision__ = '$Format:%H$'
 
-from PyQt4.QtCore import QSettings, QVariant
+from PyQt4.QtCore import QVariant
 from qgis.core import *
 
+from TDGAlgorithm import TDGAlgorithm
 import processing
-from processing.core.GeoAlgorithm import GeoAlgorithm
 from processing.core.GeoAlgorithmExecutionException import GeoAlgorithmExecutionException
 from processing.core.parameters import ParameterVector
 from processing.core.parameters import ParameterString
@@ -40,13 +40,11 @@ from processing.core.parameters import ParameterSelection
 from processing.core.outputs import OutputVector
 
 from processing.tools import dataobjects, vector
-from processing.algs.qgis import postgis_utils
-from dbutils import LayerDbInfo
 from nxutils import NXUtils
 
 import networkx as nx
 
-class TravelShed(GeoAlgorithm):
+class TravelShed(TDGAlgorithm):
     """This algorithm takes an input road network and
     a vector point layer with vertex ids and then calculates
     a travel shed for each vector feature using a maximum
@@ -145,7 +143,7 @@ class TravelShed(GeoAlgorithm):
     def processAlgorithm(self, progress):
         progress.setPercentage(0)
         # Retrieve the values of the parameters entered by the user
-        roadsLayer = dataobjects.getObjectFromUri(
+        inLayer = dataobjects.getObjectFromUri(
             self.getParameterValue(self.ROADS_LAYER))
         destsLayer = dataobjects.getObjectFromUri(
             self.getParameterValue(self.POINTS_LAYER))
@@ -157,42 +155,30 @@ class TravelShed(GeoAlgorithm):
         polyFields = QgsFields()
         polyFields.append(QgsField('input_id', QVariant.Int))
         polyWriter = self.getOutputFromName(self.POLYGON_LAYER).getVectorWriter(
-            polyFields, QGis.WKBPolygon, roadsLayer.crs())
+            polyFields, QGis.WKBPolygon, inLayer.crs())
 
         # build the road feature output layer
         routeFields = QgsFields()
         routeFields.append(QgsField('input_id', QVariant.Int))
         routeFields.append(QgsField('road_id', QVariant.Int))
         routeWriter = self.getOutputFromName(self.LINE_LAYER).getVectorWriter(
-            routeFields, QGis.WKBLineString, roadsLayer.crs())
+            routeFields, QGis.WKBLineString, inLayer.crs())
 
         progress.setPercentage(2)
 
         # establish db connection
-        roadsDb = LayerDbInfo(roadsLayer)
-        dbHost = roadsDb.getHost()
-        dbPort = roadsDb.getPort()
-        dbName = roadsDb.getDBName()
-        dbUser = roadsDb.getUser()
-        dbPass = roadsDb.getPassword()
-        dbSchema = roadsDb.getSchema()
-        dbTable = roadsDb.getTable()
-        dbType = roadsDb.getType()
-        dbSRID = roadsDb.getSRID()
-        try:
-            db = postgis_utils.GeoDB(host=dbHost,
-                                     port=dbPort,
-                                     dbname=dbName,
-                                     user=dbUser,
-                                     passwd=dbPass)
-        except postgis_utils.DbError, e:
-            raise GeoAlgorithmExecutionException(
-                self.tr("Couldn't connect to database:\n%s" % e.message))
+        progress.setInfo('Getting DB connection')
+        self.setDbFromRoadsLayer(inLayer)
+        self.setLayersFromDb()
+        if self.vertsLayer is None or self.linksLayer is None:
+            raise GeoAlgorithmExecutionException('Could not find related \
+                network tables. Have you built the network tables on \
+                layer %s?' % inLayer.name())
         progress.setPercentage(3)
 
         # get network
         progress.setInfo('Building network')
-        nu = NXUtils(roadsLayer)
+        nu = NXUtils(self.vertsLayer,self.linksLayer)
         nu.buildNetwork()
         DG = nu.getNetwork()
         progress.setPercentage(10)
@@ -215,7 +201,6 @@ class TravelShed(GeoAlgorithm):
         # loop through the point features and generate travel sheds for each
         count = 0
         totalCount = len(vertIds)
-        vertLayer = nu.getVertLayer()
         for vertId in vertIds:
             outPolyFeat = QgsFeature(polyFields)
             outPolyFeat.setAttribute(0,vertId)
@@ -232,7 +217,7 @@ class TravelShed(GeoAlgorithm):
             )
 
             # build the convex hull around the travel shed
-            vertFeats = vector.features(vertLayer)
+            vertFeats = vector.features(self.vertsLayer)
             for f in vertFeats:
                 if f['vert_id'] in paths[0].keys():
                     inGeom = QgsGeometry(f.geometry())
@@ -262,7 +247,7 @@ class TravelShed(GeoAlgorithm):
                         if roadId:
                             roadIds.add(roadId)
 
-            for f in vector.features(roadsLayer):
+            for f in vector.features(self.roadsLayer):
                 roadId = f['road_id']
                 if roadId in roadIds:
                     try:

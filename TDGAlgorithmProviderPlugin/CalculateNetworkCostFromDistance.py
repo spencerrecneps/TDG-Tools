@@ -25,20 +25,15 @@ __copyright__ = '(C) 2015, Spencer Gardner'
 
 __revision__ = '$Format:%H$'
 
-from PyQt4.QtCore import QSettings
 from qgis.core import *
-
 import processing
-from processing.core.GeoAlgorithm import GeoAlgorithm
 from processing.core.GeoAlgorithmExecutionException import GeoAlgorithmExecutionException
 from processing.core.parameters import ParameterVector
-
 from processing.tools import dataobjects
-from processing.algs.qgis import postgis_utils
-from dbutils import LayerDbInfo
+from TDGAlgorithm import TDGAlgorithm
 
 
-class CalculateNetworkCostFromDistance(GeoAlgorithm):
+class CalculateNetworkCostFromDistance(TDGAlgorithm):
     """This algorithm takes an input road dataset and converts
     it into a standardized format for use in stress analysis
     and other tasks.
@@ -73,32 +68,17 @@ class CalculateNetworkCostFromDistance(GeoAlgorithm):
         inLayer = dataobjects.getObjectFromUri(self.getParameterValue(self.ROADS_LAYER))
 
         # establish db connection
-        roadsDb = LayerDbInfo(inLayer)
-        dbHost = roadsDb.getHost()
-        dbPort = roadsDb.getPort()
-        dbName = roadsDb.getDBName()
-        dbUser = roadsDb.getUser()
-        dbPass = roadsDb.getPassword()
-        dbSchema = roadsDb.getSchema()
-        dbTable = roadsDb.getTable()
-        dbType = roadsDb.getType()
-        dbSRID = roadsDb.getSRID()
-        try:
-            db = postgis_utils.GeoDB(host=dbHost,
-                                     port=dbPort,
-                                     dbname=dbName,
-                                     user=dbUser,
-                                     passwd=dbPass)
-        except postgis_utils.DbError, e:
-            raise GeoAlgorithmExecutionException(
-                self.tr("Couldn't connect to database:\n%s" % e.message))
+        progress.setInfo('Getting DB connection')
+        self.setDbFromRoadsLayer(inLayer)
 
-        # first create the new road table
+        # set up the sql call and run
         progress.setInfo('Calculating network costs')
         sql = 'select tdg.tdgNetworkCostFromDistance(' + " \
-                '" + dbSchema + '.' + dbTable + "')"
+                '" + self.schema + '.' + self.roadsTable + "')"
+        progress.setInfo('Database call was: ')
+        progress.setInfo(sql)
         try:
-            db._exec_sql_and_commit(sql)
+            self.db.connector._execute_and_commit(sql)
         except:
             raise GeoAlgorithmExecutionException('Error communicating with \
                 database')

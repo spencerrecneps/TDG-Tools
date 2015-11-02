@@ -106,6 +106,8 @@ class CalculateStress(TDGAlgorithm):
 
         #processing.runalg("qgis:postgisexecutesql",dbName,sql)
         progress.setInfo('Calculating stress scores')
+        progress.setInfo('Database call was: ')
+        progress.setInfo(sql)
         try:
             self.db.connector._execute_and_commit(sql)
         except:
