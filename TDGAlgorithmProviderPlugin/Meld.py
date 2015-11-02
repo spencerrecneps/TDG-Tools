@@ -133,7 +133,14 @@ class Meld(GeoAlgorithm):
         keepNulls = self.getParameterValue(self.KEEP_NULLS)
 
         # loop through target features
-        for targetFeat in vector.features(targetLayer):
+        progress.setInfo('Checking target features')
+        targetFeats = vector.features(targetLayer)
+        count = 0
+        totalCount = len(targetFeats)
+        progress.setInfo('%i target features identified' % totalCount)
+        for targetFeat in targetFeats:
+            count += 1
+            progress.setPercentage(count/totalCount)
             outFeat = QgsFeature(fields)
             targetId = targetFeat.id()
             matchId = None
