@@ -18,7 +18,7 @@
 """
 
 __author__ = 'Spencer Gardner'
-__date__ = 'July 2013'
+__date__ = 'July 2015'
 __copyright__ = '(C) 2015, Spencer Gardner'
 
 # This will get replaced with a git SHA1 when you do a git archive

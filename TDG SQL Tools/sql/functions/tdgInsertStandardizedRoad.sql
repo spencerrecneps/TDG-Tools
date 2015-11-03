@@ -1,7 +1,6 @@
 CREATE OR REPLACE FUNCTION tdg.tdgInsertStandardizedRoad(
     input_table_ REGCLASS,
     road_table_ REGCLASS,
-    id_field_ TEXT,
     name_field_ TEXT,
     z_from_field_ TEXT,
     z_to_field_ TEXT,
@@ -13,6 +12,7 @@ CREATE OR REPLACE FUNCTION tdg.tdgInsertStandardizedRoad(
 RETURNS BOOLEAN AS $func$
 
 DECLARE
+    tdg_id_exists BOOLEAN;
     id_column TEXT;
     table_name TEXT;
     road_table TEXT;
@@ -30,6 +30,9 @@ BEGIN
     USING   input_table_
     INTO    id_column;
 
+    -- check for tdg_id field in source data
+    tdg_id_exists := tdgColumnCheck(input_table_,'tdg_id');
+
     --copy features over
     BEGIN
         RAISE NOTICE 'Copying features to %', road_table_;
@@ -39,8 +42,8 @@ BEGIN
         IF name_field_ IS NOT NULL THEN
             querytext := querytext || ',road_name';
             END IF;
-        IF id_field_ IS NOT NULL THEN
-            querytext := querytext || ',source_id';
+        IF tdg_id_exists THEN
+            querytext := querytext || ',tdg_id';
             END IF;
         IF func_field_ IS NOT NULL THEN
             querytext := querytext || ',functional_class';
@@ -65,8 +68,8 @@ BEGIN
         IF name_field_ IS NOT NULL THEN
             querytext := querytext || ',' || quote_ident(name_field_);
             END IF;
-        IF id_field_ IS NOT NULL THEN
-            querytext := querytext || ',' || quote_ident(id_field_);
+        IF tdg_id_exists IS NOT NULL THEN
+            querytext := querytext || ',tdg_id';
             END IF;
         IF func_field_ IS NOT NULL THEN
             querytext := querytext || ',' || quote_ident(func_field_);
@@ -113,5 +116,5 @@ BEGIN
     RETURN 't';
 END $func$ LANGUAGE plpgsql;
 ALTER FUNCTION tdg.tdgInsertStandardizedRoad(
-    REGCLASS,REGCLASS,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,
+    REGCLASS,REGCLASS,TEXT,TEXT,TEXT,TEXT,TEXT,
     TEXT,TEXT,INTEGER[]) OWNER TO gis;

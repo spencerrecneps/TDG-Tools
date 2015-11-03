@@ -54,7 +54,6 @@ class StandardizeRoadLayer(TDGAlgorithm):
     ROADS_LAYER = 'ROADS_LAYER'
     Z_FROM_FIELD = 'Z_FROM_FIELD'
     Z_TO_FIELD = 'Z_TO_FIELD'
-    ID_FIELD = 'ID_FIELD'
     NAME_FIELD = 'NAME_FIELD'
     ADT_FIELD = 'ADT_FIELD'
     SPEED_FIELD = 'SPEED_FIELD'
@@ -102,13 +101,6 @@ class StandardizeRoadLayer(TDGAlgorithm):
         # Optional field
         self.addParameter(ParameterTableField(self.Z_TO_FIELD,
             self.tr('Intersection Z (elevation) value at segment ending point'),
-            parent=self.ROADS_LAYER,
-            optional=True))
-
-        # Source ID field in the roads data
-        # Optional field
-        self.addParameter(ParameterTableField(self.ID_FIELD,
-            self.tr('Original ID field of the road layer'),
             parent=self.ROADS_LAYER,
             optional=True))
 
@@ -166,7 +158,6 @@ class StandardizeRoadLayer(TDGAlgorithm):
         inLayer = dataobjects.getObjectFromUri(self.getParameterValue(self.ROADS_LAYER))
         fieldZFrom = self.getParameterValue(self.Z_FROM_FIELD)
         fieldZTo = self.getParameterValue(self.Z_TO_FIELD)
-        fieldIdOrig = self.getParameterValue(self.ID_FIELD)
         fieldName = self.getParameterValue(self.NAME_FIELD)
         fieldADT = self.getParameterValue(self.ADT_FIELD)
         fieldSpeed = self.getParameterValue(self.SPEED_FIELD)
@@ -179,8 +170,8 @@ class StandardizeRoadLayer(TDGAlgorithm):
         # establish db connection
         progress.setInfo('Getting DB connection')
         self.setDbFromLayer(inLayer)
-        layerDb = LayerDbInfo(inLayer)
-        inTable = layerDb.getSchema() + "." + layerDb.getTable()
+        uri = QgsDataSourceURI(inLayer.source())
+        inTable = uri.schema() + "." + uri.table()
 
         # first create the new road table
         progress.setInfo('Creating standardized road layer')
@@ -206,10 +197,6 @@ class StandardizeRoadLayer(TDGAlgorithm):
         baseSql = u'select tdg.tdgInsertStandardizedRoad('
         baseSql = baseSql + "'" + inTable + "',"
         baseSql = baseSql + "'" + schema + '.' + tableName + "',"
-        if fieldIdOrig is None:
-            baseSql = baseSql + 'NULL,'
-        else:
-            baseSql = baseSql + "'" + fieldIdOrig + "',"
         if fieldName is None:
             baseSql = baseSql + 'NULL,'
         else:

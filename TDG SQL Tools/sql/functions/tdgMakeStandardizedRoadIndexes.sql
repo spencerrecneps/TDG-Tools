@@ -14,7 +14,7 @@ BEGIN
     EXECUTE format('
         CREATE INDEX sidx_%s_geom ON %s USING GIST(geom);
         CREATE INDEX idx_%s_oneway ON %s (one_way);
-        CREATE INDEX idx_%s_sourceid ON %s (source_id);
+        CREATE INDEX idx_%s_tdgid ON %s (tdg_id);
         CREATE INDEX idx_%s_funcclass ON %s (functional_class);
         CREATE INDEX idx_%s_zf ON %s (z_from);
         CREATE INDEX idx_%s_zt ON %s (z_to);

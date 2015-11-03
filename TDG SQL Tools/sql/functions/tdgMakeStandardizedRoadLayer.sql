@@ -76,7 +76,7 @@ BEGIN
                 intersection_from INT,
                 intersection_to INT,
                 source_data TEXT,
-                source_id TEXT,
+                tdg_id TEXT,
                 functional_class TEXT,
                 one_way VARCHAR(2) CHECK (
                     one_way = '||quote_literal('ft')||'

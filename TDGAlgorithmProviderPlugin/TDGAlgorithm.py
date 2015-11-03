@@ -56,7 +56,7 @@ class TDGAlgorithm(GeoAlgorithm):
     dbConnection = None
     db = None
     schema = None
-
+#db.connector.connection.notices
 
     # set the reference to the database
     def setDbFromLayer(self,inLayer):

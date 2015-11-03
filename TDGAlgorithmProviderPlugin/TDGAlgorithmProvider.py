@@ -42,6 +42,7 @@ from CalculateNetworkCostFromDistance import CalculateNetworkCostFromDistance
 from TravelShed import TravelShed
 from Meld import Meld
 from AddTdgId import AddTdgId
+from CopyViaTDGId import CopyViaTDGId
 
 pluginPath = os.path.normpath(os.path.dirname(__file__))
 
@@ -64,7 +65,8 @@ class TDGAlgorithmProvider(AlgorithmProvider):
             Meld(),
             TravelShed(),
             CalculateNetworkCostFromDistance(),
-            AddTdgId()]
+            AddTdgId(),
+            CopyViaTDGId()]
         for alg in self.alglist:
             alg.provider = self
 
