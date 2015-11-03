@@ -147,6 +147,8 @@ class Meld(GeoAlgorithm):
             outFeat.setAttribute(0,targetId)
 
             targetGeom = QgsGeometry(targetFeat.geometry())
+            if targetGeom is None:
+                continue
             targetBox = targetGeom.buffer(tolerance,1).boundingBox()
             avgDist = None
 

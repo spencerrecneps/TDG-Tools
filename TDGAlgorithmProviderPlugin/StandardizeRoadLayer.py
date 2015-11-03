@@ -36,7 +36,7 @@ from processing.core.parameters import ParameterString
 from processing.core.parameters import ParameterTableField
 from processing.core.parameters import ParameterBoolean
 from processing.core.parameters import ParameterSelection
-from processing.tools import dataobjects
+from processing.tools import dataobjects, vector
 
 
 class StandardizeRoadLayer(TDGAlgorithm):
@@ -185,8 +185,8 @@ class StandardizeRoadLayer(TDGAlgorithm):
             sql = sql + "'f')"
         try:
             self.db.connector._execute_and_commit(sql)
-        except:
-            raise
+        except Exception, e:
+            raise GeoAlgorithmExecutionException(str(e))
         progress.setPercentage(3)
 
 
@@ -226,8 +226,6 @@ class StandardizeRoadLayer(TDGAlgorithm):
         else:
             baseSql = baseSql + "'" + fieldOneway + "',"
 
-        # loop through either selected features (if any) or all features (if
-        # no selection) and process the cross streets in chunks of 1000
         featureIds = inLayer.selectedFeaturesIds()
         if len(featureIds) == 0:
             featureIds = inLayer.allFeatureIds()
@@ -245,16 +243,16 @@ class StandardizeRoadLayer(TDGAlgorithm):
                 progress.setPercentage(3+20*count/len(featureIds))
                 sql = "'{"
                 count = count + 1000
-            except:
-                raise
+            except Exception, e:
+                raise GeoAlgorithmExecutionException(str(e))
 
         # create the indexes
         sql = u'select tdgMakeStandardizedRoadIndexes('
         sql = sql + "'" + schema + '.' + tableName + "')"
         try:
             self.db.connector._execute_and_commit(sql)
-        except:
-            raise
+        except Exception, e:
+            raise GeoAlgorithmExecutionException(str(e))
         progress.setPercentage(26)
 
         # create the roads layer
@@ -268,38 +266,42 @@ class StandardizeRoadLayer(TDGAlgorithm):
             False
         )
         if not (self.roadsLayer.isValid()):
-            raise GeoAlgorithmExecutionException('Could not identify new road layer')
+            raise GeoAlgorithmExecutionException('Could not identify new road layer in database')
+        self.roadsTable = tableName
+        self.schema = schema
 
         # create the intersection table
         progress.setInfo('Creating intersection table')
-        sql = u'select tdgMakeIntersectionTable('
-        sql = sql + "'" + schema + '.' + tableName + "')"
+        sql = u'select tdg.tdgMakeIntersectionTable('
+        sql = sql + "'" + schema + '.' + self.roadsTable + "')"
         try:
             self.db.connector._execute_and_commit(sql)
-        except:
-            raise
+        except Exception, e:
+            raise GeoAlgorithmExecutionException(str(e))
         progress.setPercentage(28)
         self.setLayersFromDb()
+        if self.intsLayer is None:
+            raise GeoAlgorithmExecutionException('Could not identify new intersections layer in database')
 
         # add intersections to the intersection table
         progress.setInfo('Adding intersections')
-        sql = u'select tdgInsertIntersections('
+        sql = u'select tdg.tdgInsertIntersections('
         sql = sql + "'" + self.intsTable + "',"
         sql = sql + "'" + self.roadsTable + "')"
         try:
             self.db.connector._execute_and_commit(sql)
-        except:
-            raise
+        except Exception, e:
+            raise GeoAlgorithmExecutionException(str(e))
         progress.setPercentage(40)
 
         # create indexes on intersections table
         progress.setInfo('Adding indexes')
-        sql = u'select tdgMakeIntersectionIndexes('
+        sql = u'select tdg.tdgMakeIntersectionIndexes('
         sql = sql + "'" + self.intsTable + "')"
         try:
             self.db.connector._execute_and_commit(sql)
-        except:
-            raise
+        except Exception, e:
+            raise GeoAlgorithmExecutionException(str(e))
         progress.setPercentage(43)
 
         # loop through road features and process their intersection info
@@ -307,7 +309,7 @@ class StandardizeRoadLayer(TDGAlgorithm):
         progress.setInfo('Adding intersection data to roads')
         featureIds = self.roadsLayer.allFeatureIds()
         progress.setInfo('  Processing ' + str(len(featureIds)) + ' road features')
-        baseSql = u'select tdgSetRoadIntersections('
+        baseSql = u'select tdg.tdgSetRoadIntersections('
         baseSql = baseSql + "'" + self.intsTable + "',"
         baseSql = baseSql + "'" + self.roadsTable + "',"
         chunks = [featureIds[i:i+1000] for i in range(0, len(featureIds), 1000)]
@@ -323,14 +325,14 @@ class StandardizeRoadLayer(TDGAlgorithm):
                 progress.setPercentage(43+48*count/len(featureIds))
                 sql = "'{"
                 count = count + 1000
-            except:
-                raise
+            except Exception, e:
+                raise GeoAlgorithmExecutionException(str(e))
 
         # loop through intersection features and set the count of legs
         progress.setInfo('Calculating intersection legs')
         featureIds = self.intsLayer.allFeatureIds()
         progress.setInfo('  Processing ' + str(len(featureIds)) + ' intersection features')
-        baseSql = u'select tdgSetIntersectionLegs('
+        baseSql = u'select tdg.tdgSetIntersectionLegs('
         baseSql = baseSql + "'" + self.intsTable + "',"
         baseSql = baseSql + "'" + self.roadsTable + "',"
         chunks = [featureIds[i:i+1000] for i in range(0, len(featureIds), 1000)]
@@ -346,29 +348,29 @@ class StandardizeRoadLayer(TDGAlgorithm):
                 progress.setPercentage(91+7*count/len(featureIds))
                 sql = "'{"
                 count = count + 1000
-            except:
-                raise
+            except Exception, e:
+                raise GeoAlgorithmExecutionException(str(e))
 
         # set intersection triggers
         progress.setInfo('Adding intersection triggers')
-        sql = u'select tdgMakeIntersectionTriggers('
+        sql = u'select tdg.tdgMakeIntersectionTriggers('
         sql = sql + "'" + self.intsTable + "',"
         sql = sql + "'" + self.roadsTable + "')"
         try:
             self.db.connector._execute_and_commit(sql)
-        except:
-            raise
+        except Exception, e:
+            raise GeoAlgorithmExecutionException(str(e))
         progress.setPercentage(99)
 
         # set road triggers
         progress.setInfo('Adding road triggers')
-        sql = u'select tdgMakeRoadTriggers('
-        sql = sql + "'" + self.roadsTable + "',"
-        sql = sql + "'" + tableName + "')"
+        sql = u'select tdg.tdgMakeRoadTriggers('
+        sql = sql + "'" + schema + '.' + self.roadsTable + "',"
+        sql = sql + "'" + self.roadsTable + "')"
         try:
             self.db.connector._execute_and_commit(sql)
-        except:
-            raise
+        except Exception, e:
+            raise GeoAlgorithmExecutionException(str(e))
         progress.setPercentage(100)
 
         # add layers to map

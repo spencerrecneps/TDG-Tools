@@ -95,7 +95,10 @@ class TDGAlgorithm(GeoAlgorithm):
     # assign layers to the various TDG datasets using the roads layer as input
     def setLayersFromDb(self):
         if not self.db:
-            GeoAlgorithmExecutionException('Connection to database not set')
+            raise GeoAlgorithmExecutionException('Connection to database not set')
+
+        if self.roadsTable is None:
+            raise GeoAlgorithmExecutionException('Roads table not set in database')
 
         self.intsTable = self.roadsTable + '_intersections'
         self.vertsTable = self.roadsTable + '_net_vert'
