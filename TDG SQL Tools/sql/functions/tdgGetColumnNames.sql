@@ -6,7 +6,7 @@ RETURNS SETOF TEXT AS $func$
 BEGIN
     IF with_pk_ THEN
         RETURN QUERY EXECUTE '
-            SELECT  a.attname::TEXT AS col_nm
+            SELECT  quote_ident(a.attname::TEXT) AS col_nm
             FROM    pg_attribute a
             WHERE   a.attrelid = $1
             AND     a.attnum > 0
@@ -14,7 +14,7 @@ BEGIN
         USING input_table_;
     ELSE
         RETURN QUERY EXECUTE '
-            SELECT  a.attname::TEXT AS col_nm
+            SELECT  quote_ident(a.attname::TEXT) AS col_nm
             FROM    pg_attribute a
             WHERE   a.attrelid = $1
             AND     a.attnum > 0

@@ -40,11 +40,24 @@ BEGIN
     INTO    cols;
     cols_text := array_to_string(array_remove(cols, geom_column_),',');
 
-    -- add tdg_id column
-    EXECUTE '
-        ALTER TABLE '||input_table_||'
-        ADD COLUMN tdg_id TEXT NOT NULL DEFAULT uuid_generate_v4()::TEXT;
-    ';
+
+    -- check if tdg_id column exists. if not, add it.
+    IF tdgColumnCheck(input_table_,'tdg_id') THEN
+        RAISE NOTICE 'Column tdg_id already exists';
+        EXECUTE '
+            ALTER TABLE '||input_table_||'
+            ALTER COLUMN tdg_id TYPE TEXT,
+            ALTER COLUMN tdg_id SET DEFAULT uuid_generate_v4()::TEXT,
+            ALTER COLUMN tdg_id SET NOT NULL;
+        ';
+    ELSE
+        RAISE NOTICE 'Creating column tdg_id';
+        -- add tdg_id column
+        EXECUTE '
+            ALTER TABLE '||input_table_||'
+            ADD COLUMN tdg_id TEXT NOT NULL DEFAULT uuid_generate_v4()::TEXT;
+        ';
+    END IF;
 
     -- copy back to input_table_
     EXECUTE '

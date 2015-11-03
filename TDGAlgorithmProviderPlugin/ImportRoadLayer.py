@@ -177,6 +177,7 @@ class ImportRoadLayer(TDGAlgorithm):
             options['overwrite'] = True
 
         # import the table
+        progress.setInfo('Importing data')
         try:
             ret, errMsg = QgsVectorLayerImport.importLayer(
                 inLayer,
@@ -195,6 +196,7 @@ class ImportRoadLayer(TDGAlgorithm):
             raise GeoAlgorithmExecutionException('Failure during import: %s' % errMsg)
 
         # connect to the database
+        progress.setInfo('Converting to linestring from multi')
         dbLayer = QgsVectorLayer(uri.uri(),table,'postgres')
         self.setDbFromLayer(dbLayer)
         sql = "SELECT tdg.tdgMultiToSingle('%s.%s','geom')" % (schema,table)
