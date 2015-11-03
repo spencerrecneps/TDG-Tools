@@ -86,6 +86,7 @@ class AddTdgId(GeoAlgorithm):
         progress.setPercentage(10)
 
         # start editing and add field
+        progress.setInfo('Adding tdg_id field')
         field = QgsField('tdg_id', QVariant.String)
         inLayer.startEditing()
         provider.addAttributes([field])
@@ -94,12 +95,18 @@ class AddTdgId(GeoAlgorithm):
 
         # loop through features and add random uuid value
         fieldIndex = vector.resolveFieldIndex(inLayer,'tdg_id')
+        progress.setInfo('Setting tdg_id values')
+        count = 0
+        totalCount = len(vector.features(inLayer))
         for feat in vector.features(inLayer):
+            count += 1
+            progress.setPercentage(10 + 95*count/totalCount)
             tdgId = str(uuid.uuid4())
             feat.setAttribute(fieldIndex,tdgId)
             inLayer.updateFeature(feat)
 
         # commit and finish editing
+        progress.setInfo('Committing changes')
         success = False
         try:
             success = inLayer.commitChanges()

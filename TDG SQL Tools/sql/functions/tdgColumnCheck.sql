@@ -1,11 +1,11 @@
-CREATE OR REPLACE FUNCTION tdgColumnCheck (input_table REGCLASS, column_name TEXT)
+CREATE OR REPLACE FUNCTION tdgColumnCheck (input_table_ REGCLASS, column_name_ TEXT)
 RETURNS BOOLEAN AS $func$
 
 BEGIN
     IF EXISTS (
         SELECT 1 FROM pg_attribute
-        WHERE  attrelid = input_table
-        AND    attname = column_name
+        WHERE  attrelid = input_table_
+        AND    attname = column_name_
         AND    NOT attisdropped)
     THEN
         RETURN 't';
