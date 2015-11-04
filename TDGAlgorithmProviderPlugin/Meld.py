@@ -35,6 +35,7 @@ from processing.core.GeoAlgorithmExecutionException import GeoAlgorithmExecution
 from processing.core.parameters import ParameterVector
 from processing.core.parameters import ParameterBoolean
 from processing.core.parameters import ParameterNumber
+from processing.core.parameters import ParameterTableField
 from processing.core.outputs import OutputVector
 from processing.tools import dataobjects, vector
 
@@ -50,7 +51,9 @@ class Meld(GeoAlgorithm):
     # calling from the QGIS console.
 
     TARGET_LAYER = 'TARGET_LAYER'
+    TARGET_IDS = 'TARGET_IDS'
     SOURCE_LAYER = 'SOURCE_LAYER'
+    SOURCE_IDS = 'SOURCE_IDS'
     TOLERANCE = 'TOLERANCE'
     OUT_LAYER = 'OUT_LAYER'
     KEEP_NULLS = 'KEEP_NULLS'
@@ -74,10 +77,22 @@ class Meld(GeoAlgorithm):
         self.addParameter(ParameterVector(self.TARGET_LAYER,
             self.tr('Target layer'), [ParameterVector.VECTOR_TYPE_LINE], optional=False))
 
+        # Field with target ids
+        self.addParameter(ParameterTableField(self.TARGET_IDS,
+            self.tr('Field with target IDs'),
+            parent=self.TARGET_LAYER,
+            optional=False))
+
         # Source layer. Must be line type
         # It is a mandatory (not optional) one, hence the False argument
         self.addParameter(ParameterVector(self.SOURCE_LAYER,
             self.tr('Source layer'), [ParameterVector.VECTOR_TYPE_LINE], optional=False))
+
+        # Field with source ids
+        self.addParameter(ParameterTableField(self.SOURCE_IDS,
+            self.tr('Field with source IDs'),
+            parent=self.SOURCE_LAYER,
+            optional=False))
 
         # Tolerance
         self.addParameter(
@@ -105,17 +120,31 @@ class Meld(GeoAlgorithm):
     def processAlgorithm(self, progress):
         # Retrieve the values of the parameters entered by the user
         targetLayer = dataobjects.getObjectFromUri(self.getParameterValue(self.TARGET_LAYER))
+        targetFieldName = self.getParameterValue(self.TARGET_IDS)
         sourceLayer = dataobjects.getObjectFromUri(self.getParameterValue(self.SOURCE_LAYER))
+        sourceFieldName = self.getParameterValue(self.SOURCE_IDS)
         tolerance = self.getParameterValue(self.TOLERANCE)
-        fields = QgsFields()
-        fields.append(QgsField('source_id', QVariant.Int))
-        fields.append(QgsField('target_id', QVariant.Int))
-        writer = self.getOutputFromName(self.OUT_LAYER).getVectorWriter(
-            fields, QGis.WKBLineString, targetLayer.crs())
         keepNulls = self.getParameterValue(self.KEEP_NULLS)
 
+        # get input field types and set output fields
+        targetField = targetLayer.dataProvider().fields().at(vector.resolveFieldIndex(targetLayer,targetFieldName))
+        sourceField = sourceLayer.dataProvider().fields().at(vector.resolveFieldIndex(sourceLayer,sourceFieldName))
+        fields = QgsFields()
+        fields.append(QgsField('target_id', targetField.type()))
+        fields.append(QgsField('source_id', sourceField.type()))
+
+        # set up output writer
+        writer = self.getOutputFromName(self.OUT_LAYER).getVectorWriter(
+            fields, QGis.WKBLineString, targetLayer.crs())
+
         # create spatial index for source features
+        progress.setInfo('Indexing source features')
         index = vector.spatialindex(sourceLayer)
+
+        # build dictionary of source features
+        sourceFeatures = {}
+        for sourceFeat in vector.features(sourceLayer):
+            sourceFeatures[sourceFeat.id()] = sourceFeat
 
         # loop through target features
         progress.setInfo('Checking target features')
@@ -127,7 +156,9 @@ class Meld(GeoAlgorithm):
             count += 1
             progress.setPercentage(count/totalCount)
             outFeat = QgsFeature(fields)
-            targetId = targetFeat.id()
+            targetId = targetFeat[targetFieldName]
+            if targetId is None:
+                raise GeoAlgorithmExecutionException('Target ID value cannot be empty')
             matchId = None
             outFeat.setAttribute(0,targetId)
 
@@ -144,11 +175,6 @@ class Meld(GeoAlgorithm):
 
             # get list of source ids from the spatial index
             sourceIds = index.intersects(targetBox)
-
-            # build dictionary of source features
-            sourceFeatures = {}
-            for sourceFeat in vector.features(sourceLayer):
-                sourceFeatures[sourceFeat.id()] = sourceFeat
 
             for sourceId in sourceIds:
                 sourceGeom = QgsGeometry(sourceFeatures.get(sourceId).geometry())
@@ -178,10 +204,10 @@ class Meld(GeoAlgorithm):
 
                 if avgDist is None:
                     avgDist = checkDist
-                    matchId = sourceId
+                    matchId = sourceFeatures[sourceId][sourceFieldName]
                 elif checkDist < avgDist:
                     avgDist = checkDist
-                    matchId = sourceId
+                    matchId = sourceFeatures[sourceId][sourceFieldName]
 
             outFeat.setAttribute(1,matchId)
             outFeat.setGeometry(targetGeom)
