@@ -50,9 +50,7 @@ class Meld(GeoAlgorithm):
     # calling from the QGIS console.
 
     TARGET_LAYER = 'TARGET_LAYER'
-    #TARGET_ID = 'TARGET_ID'
     SOURCE_LAYER = 'SOURCE_LAYER'
-    #SOURCE_ID = 'SOURCE_ID'
     TOLERANCE = 'TOLERANCE'
     OUT_LAYER = 'OUT_LAYER'
     KEEP_NULLS = 'KEEP_NULLS'
@@ -76,24 +74,10 @@ class Meld(GeoAlgorithm):
         self.addParameter(ParameterVector(self.TARGET_LAYER,
             self.tr('Target layer'), [ParameterVector.VECTOR_TYPE_LINE], optional=False))
 
-        # # Unique identifier for target layer
-        # # Required
-        # self.addParameter(ParameterTableField(self.TARGET_ID,
-        #     self.tr('Unique identifier for target layer'),
-        #     parent=self.TARGET_LAYER,
-        #     optional=False))
-
         # Source layer. Must be line type
         # It is a mandatory (not optional) one, hence the False argument
         self.addParameter(ParameterVector(self.SOURCE_LAYER,
             self.tr('Source layer'), [ParameterVector.VECTOR_TYPE_LINE], optional=False))
-
-        # # Unique identifier for source layer
-        # # Required
-        # self.addParameter(ParameterTableField(self.SOURCE_ID,
-        #     self.tr('Unique identifier for source layer'),
-        #     parent=self.SOURCE_LAYER,
-        #     optional=False))
 
         # Tolerance
         self.addParameter(
@@ -122,8 +106,6 @@ class Meld(GeoAlgorithm):
         # Retrieve the values of the parameters entered by the user
         targetLayer = dataobjects.getObjectFromUri(self.getParameterValue(self.TARGET_LAYER))
         sourceLayer = dataobjects.getObjectFromUri(self.getParameterValue(self.SOURCE_LAYER))
-        # targetIdField = self.getParameterValue(self.TARGET_ID)
-        # sourceIdField = self.getParameterValue(self.SOURCE_ID)
         tolerance = self.getParameterValue(self.TOLERANCE)
         fields = QgsFields()
         fields.append(QgsField('source_id', QVariant.Int))
@@ -131,6 +113,9 @@ class Meld(GeoAlgorithm):
         writer = self.getOutputFromName(self.OUT_LAYER).getVectorWriter(
             fields, QGis.WKBLineString, targetLayer.crs())
         keepNulls = self.getParameterValue(self.KEEP_NULLS)
+
+        # create spatial index for source features
+        index = vector.spatialindex(sourceLayer)
 
         # loop through target features
         progress.setInfo('Checking target features')
@@ -149,7 +134,7 @@ class Meld(GeoAlgorithm):
             targetGeom = QgsGeometry(targetFeat.geometry())
             if targetGeom is None:
                 continue
-            targetBox = targetGeom.buffer(tolerance,1).boundingBox()
+            targetBox = targetGeom.buffer(tolerance,5).boundingBox()
             avgDist = None
 
             # get first, last, and mid points of target feature
@@ -157,41 +142,46 @@ class Meld(GeoAlgorithm):
             midPoint = targetGeom.interpolate(targetGeom.length()*0.5)
             lastPoint = targetGeom.interpolate(targetGeom.length()*1)
 
-            # loop through candidate source features
+            # get list of source ids from the spatial index
+            sourceIds = index.intersects(targetBox)
+
+            # build dictionary of source features
+            sourceFeatures = {}
             for sourceFeat in vector.features(sourceLayer):
-                # identify candidate source features (if any)
-                if sourceFeat.geometry().intersects(targetBox):
-                    sourceGeom = QgsGeometry(sourceFeat.geometry())
-                    sourceId = sourceFeat.id()
+                sourceFeatures[sourceFeat.id()] = sourceFeat
 
-                    if sourceGeom.length() < (targetGeom.length()*0.5):
-                        continue #skip a feature if it's not at least 1/2 as long as target
+            for sourceId in sourceIds:
+                sourceGeom = QgsGeometry(sourceFeatures.get(sourceId).geometry())
 
-                    # get distances
-                    firstDist = firstPoint.distance(sourceGeom)
-                    midDist = midPoint.distance(sourceGeom)
-                    lastDist = lastPoint.distance(sourceGeom)
+                # skip a feature if it's not at least 1/2 as long as target
+                if sourceGeom.length() < (targetGeom.length()*0.5):
+                    continue
 
-                    # skip a feature if it's beyond the tolerance at any point on the target
-                    if (firstDist > tolerance or
-                            midDist > tolerance or
-                            lastDist > tolerance):
-                        continue
+                # get distances
+                firstDist = firstPoint.distance(sourceGeom)
+                midDist = midPoint.distance(sourceGeom)
+                lastDist = lastPoint.distance(sourceGeom)
 
-                    # # check deviation
-                    # dev = sqrt((midDist - firstDist)**2 + (midDist - lastDist)**2)
-                    # if dev > tolerance:
-                    #     continue
+                # skip a feature if it's beyond the tolerance at any point on the target
+                if (firstDist > tolerance or
+                        midDist > tolerance or
+                        lastDist > tolerance):
+                    continue
 
-                    # get the closest match
-                    checkDist = sum([firstDist,midDist,lastDist])/3
+                # # check deviation
+                # dev = sqrt((midDist - firstDist)**2 + (midDist - lastDist)**2)
+                # if dev > tolerance:
+                #     continue
 
-                    if avgDist is None:
-                        avgDist = checkDist
-                        matchId = sourceId
-                    elif checkDist < avgDist:
-                        avgDist = checkDist
-                        matchId = sourceId
+                # get the closest match
+                checkDist = sum([firstDist,midDist,lastDist])/3
+
+                if avgDist is None:
+                    avgDist = checkDist
+                    matchId = sourceId
+                elif checkDist < avgDist:
+                    avgDist = checkDist
+                    matchId = sourceId
 
             outFeat.setAttribute(1,matchId)
             outFeat.setGeometry(targetGeom)
