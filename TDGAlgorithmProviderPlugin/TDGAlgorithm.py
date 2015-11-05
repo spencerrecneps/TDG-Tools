@@ -56,6 +56,7 @@ class TDGAlgorithm(GeoAlgorithm):
     dbConnection = None
     db = None
     schema = None
+    srid = None
 #db.connector.connection.notices
 
     # set the reference to the database
@@ -88,6 +89,7 @@ class TDGAlgorithm(GeoAlgorithm):
         uri = QgsDataSourceURI(inRoadsLayer.source())
         self.roadsTable = uri.table()
         self.schema = uri.schema()
+        self.srid = str(inRoadsLayer.crs().postgisSrid())
         self.roadsLayer = inRoadsLayer
         self.setDbFromLayer(inRoadsLayer)
 
@@ -104,38 +106,9 @@ class TDGAlgorithm(GeoAlgorithm):
         self.vertsTable = self.roadsTable + '_net_vert'
         self.linksTable = self.roadsTable + '_net_link'
 
-        self.intsLayer = self.db.toSqlLayer(
-            'SELECT * FROM %s.%s' % (self.schema,self.intsTable),
-            'geom',
-            'int_id',
-            self.getUniqueLayerName(self.intsTable),
-            QgsMapLayer.VectorLayer,
-            False
-        )
-        if not (self.intsLayer.isValid()):
-            self.intsLayer = None
-
-        self.vertsLayer = self.db.toSqlLayer(
-            'SELECT * FROM %s.%s' % (self.schema,self.vertsTable),
-            'geom',
-            'vert_id',
-            self.getUniqueLayerName(self.vertsTable),
-            QgsMapLayer.VectorLayer,
-            False
-        )
-        if not (self.vertsLayer.isValid()):
-            self.vertsLayer = None
-
-        self.linksLayer = self.db.toSqlLayer(
-            'SELECT * FROM %s.%s' % (self.schema,self.linksTable),
-            'geom',
-            'link_id',
-            self.getUniqueLayerName(self.linksTable),
-            QgsMapLayer.VectorLayer,
-            False
-        )
-        if not (self.linksLayer.isValid()):
-            self.linksLayer = None
+        self.intsLayer = self.setLayer(self.intsTable,'int_id',QGis.WKBPoint)
+        self.vertsLayer = self.setLayer(self.vertsTable,'vert_id',QGis.WKBPoint)
+        self.linksLayer = self.setLayer(self.linksTable,'link_id',QGis.WKBLineString)
 
 
     def getUniqueLayerName(self,baseName):
@@ -176,6 +149,19 @@ class TDGAlgorithm(GeoAlgorithm):
             raise GeoAlgorithmExecutionException('No stored database connection \
                     identified for layer %s' % inLayer.name())
 
+    def setLayer(self,table,keyCol,geomType=None):
+        if self.schema is None:
+            return
+        if self.db is None:
+            return
+        uri = QgsDataSourceURI(self.db.uri())
+        uri.setDataSource(self.schema,table,'geom','',keyCol)
+        if geomType:
+            uri.setWkbType(geomType)
+        uri.setSrid(self.srid)
+
+        layerName = self.getUniqueLayerName(table)
+        return QgsVectorLayer(uri.uri(), layerName, 'postgres')
 
     def setRoadsLayer(self,inLayer):
         self.roadsLayer = inLayer

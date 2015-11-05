@@ -257,18 +257,12 @@ class StandardizeRoadLayer(TDGAlgorithm):
 
         # create the roads layer
         progress.setInfo('Creating road layer')
-        self.roadsLayer = self.db.toSqlLayer(
-            'SELECT * FROM %s.%s' % (schema,tableName),
-            'geom',
-            'road_id',
-            self.getUniqueLayerName(tableName),
-            QgsMapLayer.VectorLayer,
-            False
-        )
-        if not (self.roadsLayer.isValid()):
-            raise GeoAlgorithmExecutionException('Could not identify new road layer in database')
         self.roadsTable = tableName
         self.schema = schema
+        self.srid = str(inLayer.crs().postgisSrid())
+        self.roadsLayer = self.setLayer(tableName,'road_id',QGis.WKBLineString)
+        if self.roadsLayer is None:
+            raise GeoAlgorithmExecutionException('Could not identify new road layer in database')
 
         # create the intersection table
         progress.setInfo('Creating intersection table')
