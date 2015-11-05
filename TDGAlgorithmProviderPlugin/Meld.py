@@ -167,11 +167,12 @@ class Meld(GeoAlgorithm):
                 continue
             targetBox = targetGeom.buffer(tolerance,5).boundingBox()
             avgDist = None
+            targetLength = targetGeom.length()
 
             # get first, last, and mid points of target feature
             firstPoint = targetGeom.interpolate(0)
-            midPoint = targetGeom.interpolate(targetGeom.length()*0.5)
-            lastPoint = targetGeom.interpolate(targetGeom.length()*1)
+            midPoint = targetGeom.interpolate(targetLength*0.5)
+            lastPoint = targetGeom.interpolate(targetLength)
 
             # get list of source ids from the spatial index
             sourceIds = index.intersects(targetBox)
@@ -194,10 +195,10 @@ class Meld(GeoAlgorithm):
                         lastDist > tolerance):
                     continue
 
-                # # check deviation
-                # dev = sqrt((midDist - firstDist)**2 + (midDist - lastDist)**2)
-                # if dev > tolerance:
-                #     continue
+                # check deviation
+                dev = sqrt((midDist - firstDist)**2 + (midDist - lastDist)**2)
+                if dev > (targetLength/2):
+                    continue
 
                 # get the closest match
                 checkDist = sum([firstDist,midDist,lastDist])/3
