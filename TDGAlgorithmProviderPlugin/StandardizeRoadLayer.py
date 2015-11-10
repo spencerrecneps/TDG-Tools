@@ -173,6 +173,9 @@ class StandardizeRoadLayer(TDGAlgorithm):
         uri = QgsDataSourceURI(inLayer.source())
         inTable = uri.schema() + "." + uri.table()
 
+        # check the crs on the road layer
+        crs = self.getValidCrs(inLayer.crs().toWkt())
+
         # first create the new road table
         progress.setInfo('Creating standardized road layer')
         sql = u'select tdg.tdgMakeStandardizedRoadLayer('
@@ -259,7 +262,7 @@ class StandardizeRoadLayer(TDGAlgorithm):
         progress.setInfo('Creating road layer')
         self.roadsTable = tableName
         self.schema = schema
-        self.srid = str(inLayer.crs().postgisSrid())
+        self.srid = str(crs.postgisSrid())
         self.roadsLayer = self.setLayer(tableName,'road_id',QGis.WKBLineString)
         if self.roadsLayer is None:
             raise GeoAlgorithmExecutionException('Could not identify new road layer in database')

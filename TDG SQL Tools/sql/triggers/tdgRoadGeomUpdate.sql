@@ -47,9 +47,6 @@ BEGIN
     USING   road_ids
     INTO    int_ids;
 
-    -- update legs on intersections
-    PERFORM tdgSetIntersectionLegs(int_table,road_table,int_ids);
-
     -- remove obsolete intersections
     EXECUTE '
         DELETE FROM '||int_table||'
@@ -57,6 +54,9 @@ BEGIN
                             FROM    '||road_table||' roads
                             WHERE   '||int_table||'.int_id = roads.intersection_from
                             OR      '||int_table||'.int_id = roads.intersection_to);';
+
+    -- update legs on intersections
+    PERFORM tdgSetIntersectionLegs(int_table,road_table,int_ids);
 
     --re-enable triggers on the intersections table
     EXECUTE 'ALTER TABLE ' || int_table || ' ENABLE TRIGGER ALL;';

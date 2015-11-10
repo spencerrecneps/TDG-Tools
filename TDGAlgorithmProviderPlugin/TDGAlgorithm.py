@@ -184,3 +184,18 @@ class TDGAlgorithm(GeoAlgorithm):
     # add links layer to map with styling
     def addLinksToMap(self):
         QgsMapLayerRegistry.instance().addMapLayer(self.linksLayer)
+
+    # check that a crs is a standard postgis authid
+    def getValidCrs(self,constructor):
+        crs = QgsCoordinateReferenceSystem()
+        crs.createFromUserInput(constructor)
+        pgSrid = crs.postgisSrid()
+        if pgSrid == 0:
+            raise GeoAlgorithmExecutionException('The selected coordinate system \
+                cannot be used in the PostGIS database. Please select a different \
+                projection. Hint: any projection with an EPSG code should work.')
+        if not crs.mapUnits() == QGis.Feet:
+            raise GeoAlgorithmExecutionException('The units of the selected \
+                coordinate system are not in feet. TDG Tools requires a feet-based \
+                system. Please select a different projection.')
+        return crs

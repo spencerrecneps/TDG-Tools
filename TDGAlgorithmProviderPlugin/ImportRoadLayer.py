@@ -152,8 +152,7 @@ class ImportRoadLayer(TDGAlgorithm):
 
         # Target CRS
         crsId = self.getParameterValue(self.TARGET_CRS)
-        targetCrs = QgsCoordinateReferenceSystem()
-        targetCrs.createFromUserInput(crsId)
+        targetCrs = self.getValidCrs(crsId)
         pgSrid = targetCrs.postgisSrid()
 
         ##########################
