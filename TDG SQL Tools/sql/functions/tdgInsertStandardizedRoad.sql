@@ -66,28 +66,28 @@ BEGIN
         querytext := querytext || ') SELECT ST_SnapToGrid(r.geom,2)';
         querytext := querytext || ',' || quote_literal(input_table_);
         IF name_field_ IS NOT NULL THEN
-            querytext := querytext || ',' || quote_ident(name_field_);
+            querytext := querytext || ',r.' || quote_ident(name_field_);
             END IF;
         IF tdg_id_exists IS NOT NULL THEN
-            querytext := querytext || ',tdg_id';
+            querytext := querytext || ',r.tdg_id';
             END IF;
         IF func_field_ IS NOT NULL THEN
-            querytext := querytext || ',' || quote_ident(func_field_);
+            querytext := querytext || ',r.' || quote_ident(func_field_);
             END IF;
         IF oneway_field_ IS NOT NULL THEN
-            querytext := querytext || ',' || quote_ident(oneway_field_);
+            querytext := querytext || ',r.' || quote_ident(oneway_field_);
             END IF;
         IF speed_field_ IS NOT NULL THEN
-            querytext := querytext || ',' || quote_ident(speed_field_);
+            querytext := querytext || ',r.' || quote_ident(speed_field_);
             END IF;
         IF adt_field_ IS NOT NULL THEN
-            querytext := querytext || ',' || quote_ident(adt_field_);
+            querytext := querytext || ',r.' || quote_ident(adt_field_);
             END IF;
         IF z_from_field_ IS NOT NULL THEN
-            querytext := querytext || ',' || quote_ident(z_from_field_);
+            querytext := querytext || ',r.' || quote_ident(z_from_field_);
             END IF;
         IF z_to_field_ IS NOT NULL THEN
-            querytext := querytext || ',' || quote_ident(z_to_field_);
+            querytext := querytext || ',r.' || quote_ident(z_to_field_);
             END IF;
         querytext := querytext || ' FROM ' ||input_table_|| ' r ';
 
