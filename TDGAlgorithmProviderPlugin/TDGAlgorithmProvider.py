@@ -39,6 +39,7 @@ from CalculateStress import CalculateStress
 from GetCrossStreets import GetCrossStreets
 from ShortestPathFromLayer import ShortestPathFromLayer
 from CalculateNetworkCostFromDistance import CalculateNetworkCostFromDistance
+from CalculateNetworkCostFromTime import CalculateNetworkCostFromTime
 from TravelShed import TravelShed
 from Meld import Meld
 from AddTdgId import AddTdgId
@@ -65,6 +66,7 @@ class TDGAlgorithmProvider(AlgorithmProvider):
             Meld(),
             TravelShed(),
             CalculateNetworkCostFromDistance(),
+            CalculateNetworkCostFromTime(),
             AddTdgId(),
             CopyViaTDGId()]
         for alg in self.alglist:

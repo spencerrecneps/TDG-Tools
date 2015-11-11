@@ -2,9 +2,9 @@
 
 """
 ***************************************************************************
-    CalculateNetworkCostFromDistance.py
+    CalculateNetworkCostFromTime.py
     ---------------------
-    Date                 : October 2015
+    Date                 : November 2015
     Copyright            : (C) 2015 by Spencer Gardner
     Email                : spencergardner at gmail dot com
 ***************************************************************************
@@ -18,7 +18,7 @@
 """
 
 __author__ = 'Spencer Gardner'
-__date__ = 'October 2015'
+__date__ = 'November 2015'
 __copyright__ = '(C) 2015, Spencer Gardner'
 
 # This will get replaced with a git SHA1 when you do a git archive
@@ -28,12 +28,12 @@ __revision__ = '$Format:%H$'
 from qgis.core import *
 import processing
 from processing.core.GeoAlgorithmExecutionException import GeoAlgorithmExecutionException
-from processing.core.parameters import ParameterVector
+from processing.core.parameters import ParameterVector, ParameterBoolean, ParameterNumber
 from processing.tools import dataobjects
 from TDGAlgorithm import TDGAlgorithm
 
 
-class CalculateNetworkCostFromDistance(TDGAlgorithm):
+class CalculateNetworkCostFromTime(TDGAlgorithm):
     """This algorithm takes an input road dataset and converts
     it into a standardized format for use in stress analysis
     and other tasks.
@@ -44,6 +44,8 @@ class CalculateNetworkCostFromDistance(TDGAlgorithm):
     # calling from the QGIS console.
 
     ROADS_LAYER = 'ROADS_LAYER'
+    SPEED = 'SPEED'
+    FEET_PER_SECOND = 'FEET_PER_SECOND'
 
     def defineCharacteristics(self):
         """Here we define the inputs and output of the algorithm, along
@@ -51,7 +53,7 @@ class CalculateNetworkCostFromDistance(TDGAlgorithm):
         """
 
         # The name that the user will see in the toolbox
-        self.name = 'Network cost from distance'
+        self.name = 'Network cost from time'
 
         # The branch of the toolbox under which the algorithm will appear
         #self.group = 'Algorithms for vector layers'
@@ -62,10 +64,25 @@ class CalculateNetworkCostFromDistance(TDGAlgorithm):
         self.addParameter(ParameterVector(self.ROADS_LAYER,
             self.tr('Roads layer'), [ParameterVector.VECTOR_TYPE_LINE], optional=False))
 
+        # Travel speed
+        self.addParameter(
+            ParameterNumber(
+                self.SPEED,
+                self.tr('Travel speed (default: miles per hour)'),
+                minValue=0
+            )
+        )
+
+        # Use feet per second
+        self.addParameter(ParameterBoolean(self.FEET_PER_SECOND,
+            self.tr('Speed given in feet per second'), default=False))
+
 
     def processAlgorithm(self, progress):
         # Retrieve the values of the parameters entered by the user
         inLayer = dataobjects.getObjectFromUri(self.getParameterValue(self.ROADS_LAYER))
+        speed = self.getParameterValue(self.SPEED)
+        fps = self.getParameterValue(self.FEET_PER_SECOND)
 
         # establish db connection
         progress.setInfo('Getting DB connection')
@@ -73,8 +90,7 @@ class CalculateNetworkCostFromDistance(TDGAlgorithm):
 
         # set up the sql call and run
         progress.setInfo('Calculating network costs')
-        sql = 'select tdg.tdgNetworkCostFromDistance(' + " \
-                '" + self.schema + '.' + self.roadsTable + "')"
+        sql = "select tdg.tdgNetworkCostFromTime('%s.%s',%d,%s)" % (self.schema,self.roadsTable,speed,fps)
         progress.setInfo('Database call was: ')
         progress.setInfo(sql)
         try:
