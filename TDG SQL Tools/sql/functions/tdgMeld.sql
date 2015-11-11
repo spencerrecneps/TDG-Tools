@@ -7,7 +7,7 @@ CREATE OR REPLACE FUNCTION tdg.tdgMeld(
 RETURNS BOOLEAN AS $func$
 
 DECLARE
-    target_record RECORD
+    target_record RECORD;
 
 BEGIN
     raise notice 'PROCESSING:';

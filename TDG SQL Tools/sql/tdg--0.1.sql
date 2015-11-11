@@ -681,11 +681,24 @@ BEGIN
     INTO    cols;
     cols_text := array_to_string(array_remove(cols, geom_column_),',');
 
-    -- add tdg_id column
-    EXECUTE '
-        ALTER TABLE '||input_table_||'
-        ADD COLUMN tdg_id TEXT NOT NULL DEFAULT uuid_generate_v4()::TEXT;
-    ';
+
+    -- check if tdg_id column exists. if not, add it.
+    IF tdgColumnCheck(input_table_,'tdg_id') THEN
+        RAISE NOTICE 'Column tdg_id already exists';
+        EXECUTE '
+            ALTER TABLE '||input_table_||'
+            ALTER COLUMN tdg_id TYPE TEXT,
+            ALTER COLUMN tdg_id SET DEFAULT uuid_generate_v4()::TEXT,
+            ALTER COLUMN tdg_id SET NOT NULL;
+        ';
+    ELSE
+        RAISE NOTICE 'Creating column tdg_id';
+        -- add tdg_id column
+        EXECUTE '
+            ALTER TABLE '||input_table_||'
+            ADD COLUMN tdg_id TEXT NOT NULL DEFAULT uuid_generate_v4()::TEXT;
+        ';
+    END IF;
 
     -- copy back to input_table_
     EXECUTE '
@@ -1010,14 +1023,14 @@ BEGIN
     RETURN 't';
 END $func$ LANGUAGE plpgsql;
 ALTER FUNCTION tdg.tdgSetRoadIntersections(REGCLASS,REGCLASS,INTEGER[]) OWNER TO gis;
-CREATE OR REPLACE FUNCTION tdgColumnCheck (input_table REGCLASS, column_name TEXT)
+CREATE OR REPLACE FUNCTION tdgColumnCheck (input_table_ REGCLASS, column_name_ TEXT)
 RETURNS BOOLEAN AS $func$
 
 BEGIN
     IF EXISTS (
         SELECT 1 FROM pg_attribute
-        WHERE  attrelid = input_table
-        AND    attname = column_name
+        WHERE  attrelid = input_table_
+        AND    attname = column_name_
         AND    NOT attisdropped)
     THEN
         RETURN 't';
@@ -1329,7 +1342,7 @@ RETURNS SETOF TEXT AS $func$
 BEGIN
     IF with_pk_ THEN
         RETURN QUERY EXECUTE '
-            SELECT  a.attname::TEXT AS col_nm
+            SELECT  quote_ident(a.attname::TEXT) AS col_nm
             FROM    pg_attribute a
             WHERE   a.attrelid = $1
             AND     a.attnum > 0
@@ -1337,7 +1350,7 @@ BEGIN
         USING input_table_;
     ELSE
         RETURN QUERY EXECUTE '
-            SELECT  a.attname::TEXT AS col_nm
+            SELECT  quote_ident(a.attname::TEXT) AS col_nm
             FROM    pg_attribute a
             WHERE   a.attrelid = $1
             AND     a.attnum > 0
@@ -2264,6 +2277,37 @@ ALTER FUNCTION tdg.tdgTableDetails(TEXT) OWNER TO gis;
 --         WHERE   c.oid = to_regclass(' || quote_literal(input_table_) || ')';
 -- END $func$ LANGUAGE plpgsql;
 -- ALTER FUNCTION tdgTableDetails(TEXT) OWNER TO gis;
+CREATE OR REPLACE FUNCTION tdg.tdgMeld(
+    target_table_ REGCLASS,
+    target_column_ TEXT,
+    source_table_ REGCLASS,
+    source_column_ TEXT,
+    tolerance FLOAT)
+RETURNS BOOLEAN AS $func$
+
+DECLARE
+    target_record RECORD;
+
+BEGIN
+    raise notice 'PROCESSING:';
+
+    -- check columns
+    IF NOT tdgColumnCheck(target_table_,target_column_) THEN
+        RAISE EXCEPTION 'Column % not found', target_column_;
+    END IF;
+    IF NOT tdgColumnCheck(source_table_,source_column_) THEN
+        RAISE EXCEPTION 'Column % not found', source_column_;
+    END IF;
+
+    -- iterate target records
+    FOR target_record IN EXECUTE 'SELECT * FROM '||target_table_
+    LOOP
+
+    END LOOP;
+
+    RETURN 't';
+END $func$ LANGUAGE plpgsql;
+ALTER FUNCTION tdg.tdgMeld(REGCLASS,TEXT,REGCLASS,TEXT,FLOAT) OWNER TO gis;
 CREATE OR REPLACE FUNCTION tdg.tdgMakeIntersectionTriggers(
     int_table_ REGCLASS,
     table_name_ TEXT)
@@ -2406,9 +2450,6 @@ BEGIN
     USING   road_ids
     INTO    int_ids;
 
-    -- update legs on intersections
-    PERFORM tdgSetIntersectionLegs(int_table,road_table,int_ids);
-
     -- remove obsolete intersections
     EXECUTE '
         DELETE FROM '||int_table||'
@@ -2416,6 +2457,9 @@ BEGIN
                             FROM    '||road_table||' roads
                             WHERE   '||int_table||'.int_id = roads.intersection_from
                             OR      '||int_table||'.int_id = roads.intersection_to);';
+
+    -- update legs on intersections
+    PERFORM tdgSetIntersectionLegs(int_table,road_table,int_ids);
 
     --re-enable triggers on the intersections table
     EXECUTE 'ALTER TABLE ' || int_table || ' ENABLE TRIGGER ALL;';

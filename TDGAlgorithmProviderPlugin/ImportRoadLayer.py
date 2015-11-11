@@ -164,10 +164,13 @@ class ImportRoadLayer(TDGAlgorithm):
             "CREATE SCHEMA IF NOT EXISTS " + schema)
         progress.setPercentage(5)
 
+        # set up the primary key field
+        pk = vector.createUniqueFieldName('id',inLayer.dataProvider().fields())
+
         # set up connection to the db
         uri = QgsDataSourceURI()
         uri.setConnection(host, str(port), database, username, password)
-        uri.setDataSource(schema, table, 'geom', '', 'id')
+        uri.setDataSource(schema, table, 'geom', '', pk)
 
         # set import options
         options = {}
@@ -201,6 +204,7 @@ class ImportRoadLayer(TDGAlgorithm):
         sql = "SELECT tdg.tdgMultiToSingle('%s.%s','geom')" % (schema,table)
         try:
             self.db.connector._execute_and_commit(sql)
+            self.db.connector.runVacuumAnalyze(table)
         except Exception, e:
             raise GeoAlgorithmExecutionException('Error converting from multi to single: %s' % e)
 
