@@ -243,116 +243,31 @@ VALUES  (25,3,1),
 
 GRANT ALL ON TABLE tdg.stress_cross_no_median TO public;
 ANALYZE tdg.stress_cross_no_median;
-CREATE OR REPLACE FUNCTION tdg.tdgSetTurnInfo (
-    link_table_ REGCLASS,
-    int_table_ REGCLASS,
-    vert_table_ REGCLASS,
-    int_ids_ INT[] DEFAULT NULL)
-RETURNS BOOLEAN AS $func$
+CREATE OR REPLACE FUNCTION tdg.tdgGetPkColumn (input_table_ REGCLASS)
+RETURNS TEXT AS $func$
 
 DECLARE
-    temp_table TEXT;
-    link_record RECORD;
-    source_vert INT;
+    col TEXT;
 
 BEGIN
-    --compile list of int_ids_ if needed
-    IF int_ids_ IS NULL THEN
-        EXECUTE 'SELECT array_agg(int_id) FROM '||int_table_||';' INTO int_ids_;
-    END IF;
-
-    --set existing movements to null
+    RAISE NOTICE 'Getting primary key column for %',input_table_;
     EXECUTE '
-        UPDATE  '||link_table_||'
-        SET     movement = NULL
-        FROM    '||int_table_||' ints
-        WHERE   ints.int_id = '||link_table_||'.int_id
-        AND     ints.int_id = ANY ($1);'
-    USING   int_ids_;
+        SELECT a.attname
+        FROM   pg_index i
+        JOIN   pg_attribute a ON a.attrelid = i.indrelid
+                             AND a.attnum = ANY(i.indkey)
+        WHERE  i.indrelid = $1::regclass
+        AND    i.indisprimary
+        LIMIT  1;'
+    USING   input_table_
+    INTO    col;
 
-    --loop through links with int legs > 3. find r/l turns using sin/cos
-    FOR link_record IN
-    EXECUTE '
-        SELECT  links.road_id,
-                ST_Azimuth(ST_StartPoint(links.geom),ST_EndPoint(links.geom)) AS azi,
-                links.target_vert,
-                ints.legs,
-                ints.int_id
-        FROM    '||link_table_||' links
-        JOIN    '||vert_table_||' verts
-                ON links.target_vert = verts.vert_id
-        JOIN    '||int_table_||' ints
-                ON verts.int_id = ints.int_id
-                AND ints.legs > 2
-        WHERE   links.road_id IS NOT NULL
-        AND     ints.int_id = ANY ($1)'
-    USING   int_ids_
-    LOOP
-        --right turn
-        EXECUTE '
-            SELECT      links.source_vert
-            FROM        '||link_table_||' links
-            JOIN        '||vert_table_||' verts
-                        ON links.source_vert = verts.vert_id
-            WHERE       links.road_id IS NOT NULL
-            AND         links.road_id != $1
-            AND         verts.int_id = $2
-            AND         sin(ST_Azimuth(ST_StartPoint(links.geom),ST_EndPoint(links.geom)) - $3) > 0 --must be between 0 and 180 degrees
-            AND         cos(ST_Azimuth(ST_StartPoint(links.geom),ST_EndPoint(links.geom)) - $3) < 0.7 --must be greater than 45 degrees
-            ORDER BY    cos(ST_Azimuth(ST_StartPoint(links.geom),ST_EndPoint(links.geom)) - $3) ASC --closest to 180 degrees
-            LIMIT       1;'
-        USING   link_record.road_id,
-                link_record.int_id,
-                link_record.azi
-        INTO    source_vert;
+    RAISE NOTICE '  -> column is %',col;
 
-        IF NOT source_vert IS NULL THEN
-            EXECUTE '
-                UPDATE  '||link_table_||'
-                SET     movement = $1
-                WHERE   source_vert = $2
-                AND     target_vert = $3;'
-            USING   'right',
-                    link_record.target_vert,
-                    source_vert;
-        END IF;
+    RETURN col;
 
-        --left turn
-        EXECUTE '
-            SELECT      links.source_vert
-            FROM        '||link_table_||' links
-            JOIN        '||vert_table_||' verts
-                        ON links.source_vert = verts.vert_id
-            WHERE       links.road_id IS NOT NULL
-            AND         links.road_id != $1
-            AND         verts.int_id = $2
-            AND         sin(ST_Azimuth(ST_StartPoint(links.geom),ST_EndPoint(links.geom)) - $3) < 0 --must be between 180 and 360 degrees
-            AND         cos(ST_Azimuth(ST_StartPoint(links.geom),ST_EndPoint(links.geom)) - $3) < 0.7 --must be less than 315 degrees
-            ORDER BY    cos(ST_Azimuth(ST_StartPoint(links.geom),ST_EndPoint(links.geom)) - $3) ASC --closest to 180 degrees
-            LIMIT       1;'
-        USING   link_record.road_id,
-                link_record.int_id,
-                link_record.azi
-        INTO    source_vert;
-
-        IF NOT source_vert IS NULL THEN
-            EXECUTE '
-                UPDATE  '||link_table_||'
-                SET     movement = $1
-                WHERE   source_vert = $2
-                AND     target_vert = $3;'
-            USING   'left',
-                    link_record.target_vert,
-                    source_vert;
-        END IF;
-    END LOOP;
-
-    EXECUTE 'UPDATE '||link_table_||' SET movement = $1 WHERE movement IS NULL;'
-    USING   'straight';
-
-    RETURN 't';
 END $func$ LANGUAGE plpgsql;
-ALTER FUNCTION tdg.tdgSetTurnInfo(REGCLASS,REGCLASS,REGCLASS,INT[]) OWNER TO gis;
+ALTER FUNCTION tdg.tdgGetPkColumn(REGCLASS) OWNER TO gis;
 CREATE OR REPLACE FUNCTION tdg.tdgGenerateCrossStreetData(
     road_table_ REGCLASS,
     road_ids_ INTEGER[] DEFAULT NULL)
@@ -462,6 +377,55 @@ BEGIN
     RETURN 't';
 END $func$ LANGUAGE plpgsql;
 ALTER FUNCTION tdg.tdgGenerateCrossStreetData(REGCLASS,INTEGER[]) OWNER TO gis;
+CREATE OR REPLACE FUNCTION tdg.tdgNetworkCostFromTime(
+    road_table_ REGCLASS,
+    speed_ FLOAT,
+    feet_per_second_ BOOLEAN DEFAULT NULL,
+    road_ids_ INTEGER[] DEFAULT NULL)
+--populate cross-street data
+RETURNS BOOLEAN AS $func$
+
+DECLARE
+    link_table REGCLASS;
+    speed_fps FLOAT;
+
+BEGIN
+    raise notice 'PROCESSING:';
+
+    IF speed_ = 0 THEN
+        RETURN 'f';
+    END IF;
+
+    link_table = road_table_ || '_net_link';
+
+    -- convert to feet per second if necessary
+    IF feet_per_second_ IS NULL THEN
+        speed_fps := speed_ * 5280 / 3600;
+    ELSE
+        speed_fps := speed_;
+    END IF;
+
+    IF road_ids_ IS NULL THEN
+        EXECUTE '
+            UPDATE  '||link_table||'
+            SET     link_cost = ST_Length(r.geom) / $1
+            FROM    '||road_table_||' r
+            WHERE   r.road_id = '||link_table||'.road_id;'
+        USING   speed_fps;
+    ELSE
+        EXECUTE '
+            UPDATE  '||link_table||'
+            SET     link_cost = ST_Length(r.geom) / $1
+            FROM    '||road_table_||' r
+            WHERE   r.road_id = '||link_table||'.road_id
+            AND     r.road_id = ANY ($1);'
+        USING   speed_fps,
+                road_ids_;
+    END IF;
+
+    RETURN 't';
+END $func$ LANGUAGE plpgsql;
+ALTER FUNCTION tdg.tdgNetworkCostFromTime(REGCLASS,FLOAT,BOOLEAN,INTEGER[]) OWNER TO gis;
 CREATE OR REPLACE FUNCTION tdg.tdgInsertIntersections(
     int_table_ REGCLASS,
     road_table_ REGCLASS)
@@ -492,24 +456,21 @@ BEGIN
     RETURN 't';
 END $func$ LANGUAGE plpgsql;
 ALTER FUNCTION tdg.tdgInsertIntersections(REGCLASS,REGCLASS) OWNER TO gis;
-CREATE OR REPLACE FUNCTION tdgTableCheck (input_table REGCLASS)
+CREATE OR REPLACE FUNCTION tdg.tdgTableCheck (input_table_ TEXT)
 RETURNS BOOLEAN AS $func$
 
 DECLARE
     namecheck RECORD;
 
 BEGIN
-    RAISE NOTICE 'Checking % exists',input_table;
-    EXECUTE '   SELECT  schema_name,
-                        table_name
-                FROM    tdgTableDetails('||quote_literal(input_table)||') AS (schema_name TEXT, table_name TEXT)' INTO namecheck;
-    IF namecheck.schema_name IS NULL OR namecheck.table_name IS NULL THEN
+    RAISE NOTICE 'Checking % exists',input_table_;
+    EXECUTE 'SELECT '||input_table_||'::REGCLASS';
+    RETURN 't';
+EXCEPTION
+    WHEN undefined_table THEN
         RETURN 'f';
-    END IF;
-
-RETURN 't';
 END $func$ LANGUAGE plpgsql;
-ALTER FUNCTION tdgTableCheck(REGCLASS) OWNER TO gis;
+ALTER FUNCTION tdg.tdgTableCheck(TEXT) OWNER TO gis;
 CREATE OR REPLACE FUNCTION tdg.tdgMakeStandardizedRoadLayer(
     input_table_ REGCLASS,
     output_schema_ TEXT,
@@ -711,6 +672,116 @@ BEGIN
 
 END $func$ LANGUAGE plpgsql;
 ALTER FUNCTION tdg.tdgMultiToSingle(REGCLASS,TEXT) OWNER TO gis;
+CREATE OR REPLACE FUNCTION tdg.tdgSetTurnInfo (
+    link_table_ REGCLASS,
+    int_table_ REGCLASS,
+    vert_table_ REGCLASS,
+    int_ids_ INT[] DEFAULT NULL)
+RETURNS BOOLEAN AS $func$
+
+DECLARE
+    temp_table TEXT;
+    link_record RECORD;
+    source_vert INT;
+
+BEGIN
+    --compile list of int_ids_ if needed
+    IF int_ids_ IS NULL THEN
+        EXECUTE 'SELECT array_agg(int_id) FROM '||int_table_||';' INTO int_ids_;
+    END IF;
+
+    --set existing movements to null
+    EXECUTE '
+        UPDATE  '||link_table_||'
+        SET     movement = NULL
+        FROM    '||int_table_||' ints
+        WHERE   ints.int_id = '||link_table_||'.int_id
+        AND     ints.int_id = ANY ($1);'
+    USING   int_ids_;
+
+    --loop through links with int legs > 3. find r/l turns using sin/cos
+    FOR link_record IN
+    EXECUTE '
+        SELECT  links.road_id,
+                ST_Azimuth(ST_StartPoint(links.geom),ST_EndPoint(links.geom)) AS azi,
+                links.target_vert,
+                ints.legs,
+                ints.int_id
+        FROM    '||link_table_||' links
+        JOIN    '||vert_table_||' verts
+                ON links.target_vert = verts.vert_id
+        JOIN    '||int_table_||' ints
+                ON verts.int_id = ints.int_id
+                AND ints.legs > 2
+        WHERE   links.road_id IS NOT NULL
+        AND     ints.int_id = ANY ($1)'
+    USING   int_ids_
+    LOOP
+        --right turn
+        EXECUTE '
+            SELECT      links.source_vert
+            FROM        '||link_table_||' links
+            JOIN        '||vert_table_||' verts
+                        ON links.source_vert = verts.vert_id
+            WHERE       links.road_id IS NOT NULL
+            AND         links.road_id != $1
+            AND         verts.int_id = $2
+            AND         sin(ST_Azimuth(ST_StartPoint(links.geom),ST_EndPoint(links.geom)) - $3) > 0 --must be between 0 and 180 degrees
+            AND         cos(ST_Azimuth(ST_StartPoint(links.geom),ST_EndPoint(links.geom)) - $3) < 0.7 --must be greater than 45 degrees
+            ORDER BY    cos(ST_Azimuth(ST_StartPoint(links.geom),ST_EndPoint(links.geom)) - $3) ASC --closest to 180 degrees
+            LIMIT       1;'
+        USING   link_record.road_id,
+                link_record.int_id,
+                link_record.azi
+        INTO    source_vert;
+
+        IF NOT source_vert IS NULL THEN
+            EXECUTE '
+                UPDATE  '||link_table_||'
+                SET     movement = $1
+                WHERE   source_vert = $2
+                AND     target_vert = $3;'
+            USING   'right',
+                    link_record.target_vert,
+                    source_vert;
+        END IF;
+
+        --left turn
+        EXECUTE '
+            SELECT      links.source_vert
+            FROM        '||link_table_||' links
+            JOIN        '||vert_table_||' verts
+                        ON links.source_vert = verts.vert_id
+            WHERE       links.road_id IS NOT NULL
+            AND         links.road_id != $1
+            AND         verts.int_id = $2
+            AND         sin(ST_Azimuth(ST_StartPoint(links.geom),ST_EndPoint(links.geom)) - $3) < 0 --must be between 180 and 360 degrees
+            AND         cos(ST_Azimuth(ST_StartPoint(links.geom),ST_EndPoint(links.geom)) - $3) < 0.7 --must be less than 315 degrees
+            ORDER BY    cos(ST_Azimuth(ST_StartPoint(links.geom),ST_EndPoint(links.geom)) - $3) ASC --closest to 180 degrees
+            LIMIT       1;'
+        USING   link_record.road_id,
+                link_record.int_id,
+                link_record.azi
+        INTO    source_vert;
+
+        IF NOT source_vert IS NULL THEN
+            EXECUTE '
+                UPDATE  '||link_table_||'
+                SET     movement = $1
+                WHERE   source_vert = $2
+                AND     target_vert = $3;'
+            USING   'left',
+                    link_record.target_vert,
+                    source_vert;
+        END IF;
+    END LOOP;
+
+    EXECUTE 'UPDATE '||link_table_||' SET movement = $1 WHERE movement IS NULL;'
+    USING   'straight';
+
+    RETURN 't';
+END $func$ LANGUAGE plpgsql;
+ALTER FUNCTION tdg.tdgSetTurnInfo(REGCLASS,REGCLASS,REGCLASS,INT[]) OWNER TO gis;
 CREATE OR REPLACE FUNCTION tdg.tdgNetworkCostFromDistance(
     road_table_ REGCLASS,
     road_ids_ INTEGER[] DEFAULT NULL)
@@ -744,6 +815,59 @@ BEGIN
     RETURN 't';
 END $func$ LANGUAGE plpgsql;
 ALTER FUNCTION tdg.tdgNetworkCostFromDistance(REGCLASS,INTEGER[]) OWNER TO gis;
+CREATE OR REPLACE FUNCTION tdg.tdgCopyTable (
+    input_table_ REGCLASS,
+    table_ TEXT,
+    schema_ TEXT DEFAULT NULL,
+    overwrite_ BOOLEAN DEFAULT 'f'::BOOLEAN
+)
+RETURNS BOOLEAN AS $func$
+
+DECLARE
+    schema TEXT;
+    table_name TEXT;
+    table_check BOOLEAN;
+    pk_col TEXT;
+
+BEGIN
+    -- get schema
+    IF schema_ IS NULL THEN
+        EXECUTE 'SELECT schema_name FROM tdg.tdgTableDetails($1)'
+        USING   input_table_::TEXT
+        INTO schema;
+    ELSE
+        schema := schema_;
+    END IF;
+
+    -- build full table name
+    table_name := quote_ident(schema) || '.' || quote_ident(table_);
+
+    -- deal with overwriting
+    IF overwrite_ THEN
+        EXECUTE 'DROP TABLE IF EXISTS '||table_name;
+    ELSE
+        -- test for existence of new table, error if exists
+        IF tdg.tdgTableCheck(table_name) THEN
+            RAISE EXCEPTION 'Table % already exists', table_name;
+        END IF;
+    END IF;
+
+    -- create new table
+    EXECUTE 'CREATE TABLE '||table_name||' (LIKE '||input_table_||')';
+    EXECUTE 'INSERT INTO '||table_name||' SELECT * FROM '||input_table_;
+
+    -- get pk column from source table and set on new table
+    pk_col := tdg.tdgGetPkColumn(input_table_);
+    EXECUTE 'ALTER TABLE '||table_name||' ADD PRIMARY KEY ('||pk_col||')';
+
+    -- set sequence on new table
+    EXECUTE 'SELECT tdg.tdgMakeSequence($1)'
+    USING   table_name;
+
+    RETURN 't';
+
+END $func$ LANGUAGE plpgsql;
+ALTER FUNCTION tdg.tdgCopyTable(REGCLASS, TEXT, TEXT, BOOLEAN) OWNER TO gis;
 CREATE OR REPLACE FUNCTION tdg.tdgShortestPathVerts (
     link_table_ REGCLASS,
     vert_table_ REGCLASS,
@@ -1366,6 +1490,61 @@ BEGIN
 
 END $func$ LANGUAGE plpgsql;
 ALTER FUNCTION tdg.tdgGetColumnNames(REGCLASS,BOOLEAN) OWNER TO gis;
+CREATE OR REPLACE FUNCTION tdg.tdgMakeSequence (
+    input_table_ REGCLASS,
+    column_ TEXT DEFAULT NULL
+)
+RETURNS BOOLEAN AS $func$
+
+DECLARE
+    table_name TEXT;
+    column_name TEXT;
+    seq_name TEXT;
+    seq_max INTEGER;
+
+BEGIN
+    RAISE NOTICE 'Adding sequence to %',input_table_;
+
+    -- get column if none given
+    IF column_ IS NULL THEN
+        RAISE NOTICE 'Getting column';
+        column_name := tdg.tdgGetPkColumn(input_table_);
+    ELSE
+        column_name := column_;
+    END IF;
+
+    -- get table name
+    RAISE NOTICE 'Getting base table name';
+    EXECUTE 'SELECT table_name FROM tdg.tdgTableDetails($1)'
+    USING   input_table_::TEXT
+    INTO    table_name;
+
+    -- build sequence name
+    seq_name := table_name||'_'||column_name||'_seq';
+    RAISE NOTICE 'Sequence name: %',seq_name;
+
+    -- get maximum existing value
+    RAISE NOTICE 'Getting current max value';
+    EXECUTE 'SELECT MAX('||column_name||') FROM '||input_table_||';'
+    INTO    seq_max;
+    RAISE NOTICE 'Max value: %',seq_max::TEXT;
+
+    -- create sequence
+    RAISE NOTICE 'Creating sequence';
+    EXECUTE 'DROP SEQUENCE IF EXISTS '||seq_name||';';
+    EXECUTE 'CREATE SEQUENCE '||seq_name||' START WITH '||seq_max::TEXT||';';
+
+    -- assign as default on the column
+    RAISE NOTICE 'Assigning sequence to column %',column_name;
+    EXECUTE '
+        ALTER TABLE '||input_table_||' 
+        ALTER COLUMN '||column_name||'
+        SET DEFAULT nextval('||quote_literal(seq_name)||'::REGCLASS)';
+
+    RETURN 't';
+
+END $func$ LANGUAGE plpgsql;
+ALTER FUNCTION tdg.tdgMakeSequence(REGCLASS,TEXT) OWNER TO gis;
 CREATE OR REPLACE FUNCTION tdg.tdgMakeIntersections (
     road_table_ REGCLASS,
     z_vals_ BOOLEAN DEFAULT 'f')
@@ -1620,28 +1799,28 @@ BEGIN
         querytext := querytext || ') SELECT ST_SnapToGrid(r.geom,2)';
         querytext := querytext || ',' || quote_literal(input_table_);
         IF name_field_ IS NOT NULL THEN
-            querytext := querytext || ',' || quote_ident(name_field_);
+            querytext := querytext || ',r.' || quote_ident(name_field_);
             END IF;
         IF tdg_id_exists IS NOT NULL THEN
-            querytext := querytext || ',tdg_id';
+            querytext := querytext || ',r.tdg_id';
             END IF;
         IF func_field_ IS NOT NULL THEN
-            querytext := querytext || ',' || quote_ident(func_field_);
+            querytext := querytext || ',r.' || quote_ident(func_field_);
             END IF;
         IF oneway_field_ IS NOT NULL THEN
-            querytext := querytext || ',' || quote_ident(oneway_field_);
+            querytext := querytext || ',r.' || quote_ident(oneway_field_);
             END IF;
         IF speed_field_ IS NOT NULL THEN
-            querytext := querytext || ',' || quote_ident(speed_field_);
+            querytext := querytext || ',r.' || quote_ident(speed_field_);
             END IF;
         IF adt_field_ IS NOT NULL THEN
-            querytext := querytext || ',' || quote_ident(adt_field_);
+            querytext := querytext || ',r.' || quote_ident(adt_field_);
             END IF;
         IF z_from_field_ IS NOT NULL THEN
-            querytext := querytext || ',' || quote_ident(z_from_field_);
+            querytext := querytext || ',r.' || quote_ident(z_from_field_);
             END IF;
         IF z_to_field_ IS NOT NULL THEN
-            querytext := querytext || ',' || quote_ident(z_to_field_);
+            querytext := querytext || ',r.' || quote_ident(z_to_field_);
             END IF;
         querytext := querytext || ' FROM ' ||input_table_|| ' r ';
 

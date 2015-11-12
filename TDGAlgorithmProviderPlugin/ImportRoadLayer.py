@@ -86,7 +86,7 @@ class ImportRoadLayer(TDGAlgorithm):
             self.tr('Database (connection name)'), self.DB_CONNECTIONS))
 
         # Schema name
-        self.SCHEMA_NAMES = ['generated','received','scratch']
+        # self.SCHEMA_NAMES = ['generated','received','scratch']
         self.addParameter(ParameterSelection(self.SCHEMANAME,
             self.tr('Schema'), self.SCHEMA_NAMES))
 

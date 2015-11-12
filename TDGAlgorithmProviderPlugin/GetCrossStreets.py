@@ -4,7 +4,7 @@
 ***************************************************************************
     CalculateStress.py
     ---------------------
-    Date                 : July 2015
+    Date                 : November 2015
     Copyright            : (C) 2015 by Spencer Gardner
     Email                : spencergardner at gmail dot com
 ***************************************************************************
@@ -18,21 +18,17 @@
 """
 
 __author__ = 'Spencer Gardner'
-__date__ = 'July 2013'
+__date__ = 'November 2015'
 __copyright__ = '(C) 2015, Spencer Gardner'
 
 # This will get replaced with a git SHA1 when you do a git archive
 
 __revision__ = '$Format:%H$'
 
-from PyQt4.QtCore import QSettings, QVariant
-from qgis.core import QgsDataSourceURI, QgsVectorLayerImport, QGis, QgsFeature, QgsGeometry
-
 from TDGAlgorithm import TDGAlgorithm
 import processing
 from processing.core.GeoAlgorithmExecutionException import GeoAlgorithmExecutionException
 from processing.core.parameters import ParameterVector
-from processing.core.parameters import ParameterBoolean
 from processing.tools import dataobjects
 
 
@@ -46,9 +42,6 @@ class GetCrossStreets(TDGAlgorithm):
     # calling from the QGIS console.
 
     ROADS_LAYER = 'ROADS_LAYER'
-    SEGMENT = 'SEGMENT'
-    APPROACH = 'APPROACH'
-    CROSS = 'CROSS'
 
     def defineCharacteristics(self):
         """Here we define the inputs and output of the algorithm, along
@@ -76,6 +69,11 @@ class GetCrossStreets(TDGAlgorithm):
         progress.setInfo('Getting DB connection')
         self.setDbFromRoadsLayer(inLayer)
 
+        # check if this is a roads layer
+        self.setLayersFromDb()
+        if not self.intsLayer.isValid():
+            raise GeoAlgorithmExecutionException('Layer %s is not a valid TDG \
+                roads layer' % inLayer.name())
 
         # build the base sql statement
         baseSql = u'select tdgGenerateCrossStreetData('
