@@ -210,5 +210,5 @@ class ImportRoadLayer(TDGAlgorithm):
 
         if addToMap:
             uri.setWkbType(QGis.WKBLineString)
-            self.setRoadsLayer(QgsVectorLayer(uri.uri(),table,'postgres'))
-            self.addRoadsToMap()
+            outLayer = QgsVectorLayer(uri.uri(),table,'postgres')
+            QgsMapLayerRegistry.instance().addMapLayer(outLayer)

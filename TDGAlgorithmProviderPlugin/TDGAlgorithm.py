@@ -43,6 +43,8 @@ class TDGAlgorithm(GeoAlgorithm):
     goodies thrown in related to TDG tools
     """
 
+    # stylePath = QgsApplication.pluginPath() + '/TDGAlgorithmProviderPlugin/styles/'
+
     roadsLayer = None
     roadsTable = None
     intsLayer = None
@@ -169,18 +171,16 @@ class TDGAlgorithm(GeoAlgorithm):
 
     # add roads layer to map with styling
     def addRoadsToMap(self):
+        # self.roadsLayer.loadNamedStyle(self.stylePath + 'base_roads.qml')
         QgsMapLayerRegistry.instance().addMapLayer(self.roadsLayer)
-
 
     # add intersections layer to map with styling
     def addIntsToMap(self):
         QgsMapLayerRegistry.instance().addMapLayer(self.intsLayer)
 
-
     # add vertices layer to map with styling
     def addVertsToMap(self):
         QgsMapLayerRegistry.instance().addMapLayer(self.vertsLayer)
-
 
     # add links layer to map with styling
     def addLinksToMap(self):
