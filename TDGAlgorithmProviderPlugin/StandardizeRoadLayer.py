@@ -95,6 +95,7 @@ class StandardizeRoadLayer(TDGAlgorithm):
         self.addParameter(ParameterTableField(self.Z_FROM_FIELD,
             self.tr('Intersection Z (elevation) value at segment starting point'),
             parent=self.ROADS_LAYER,
+            datatype=ParameterTableField.DATA_TYPE_NUMBER,
             optional=True))
 
         # Field with z elev values
@@ -102,6 +103,7 @@ class StandardizeRoadLayer(TDGAlgorithm):
         self.addParameter(ParameterTableField(self.Z_TO_FIELD,
             self.tr('Intersection Z (elevation) value at segment ending point'),
             parent=self.ROADS_LAYER,
+            datatype=ParameterTableField.DATA_TYPE_NUMBER,
             optional=True))
 
         # Name field in the roads data
@@ -116,6 +118,7 @@ class StandardizeRoadLayer(TDGAlgorithm):
         self.addParameter(ParameterTableField(self.ADT_FIELD,
             self.tr('ADT field of the road layer'),
             parent=self.ROADS_LAYER,
+            datatype=ParameterTableField.DATA_TYPE_NUMBER,
             optional=True))
 
         # Speed limit field in the roads data
@@ -123,6 +126,7 @@ class StandardizeRoadLayer(TDGAlgorithm):
         self.addParameter(ParameterTableField(self.SPEED_FIELD,
             self.tr('Speed limit field of the road layer'),
             parent=self.ROADS_LAYER,
+            datatype=ParameterTableField.DATA_TYPE_NUMBER,
             optional=True))
 
         # Function class field in the roads data
@@ -137,6 +141,7 @@ class StandardizeRoadLayer(TDGAlgorithm):
         self.addParameter(ParameterTableField(self.ONEWAY_FIELD,
             self.tr('One way field of the road layer'),
             parent=self.ROADS_LAYER,
+            datatype=ParameterTableField.DATA_TYPE_STRING,
             optional=True))
 
         # Add new table to map?
