@@ -78,9 +78,10 @@ class AddSymbolizedStressLayer(TDGAlgorithm):
             raise GeoAlgorithmExecutionException('Layer %s is not a valid TDG \
                 roads layer' % inLayer.name())
 
-        # need to get unique layer name
-
-        self.roadsLayer.loadNamedStyle(
+        # create the new layer
+        stressLayerName = self.getUniqueLayerName(self.roadsTable + '_stress')
+        stressLayer = QgsVectorLayer(self.roadsLayer.source(), stressLayerName, 'postgres')
+        stressLayer.loadNamedStyle(
             os.path.join(self.stylePath, 'stress.qml')
         )
-        QgsMapLayerRegistry.instance().addMapLayer(self.roadsLayer)
+        QgsMapLayerRegistry.instance().addMapLayer(stressLayer)
