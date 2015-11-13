@@ -36,6 +36,7 @@ from ImportRoadLayer import ImportRoadLayer
 from StandardizeRoadLayer import StandardizeRoadLayer
 from MakeRoadNetwork import MakeRoadNetwork
 from CalculateStress import CalculateStress
+from AddSymbolizedStressLayer import AddSymbolizedStressLayer
 from GetCrossStreets import GetCrossStreets
 from ShortestPathFromLayer import ShortestPathFromLayer
 from CalculateNetworkCostFromDistance import CalculateNetworkCostFromDistance
@@ -62,6 +63,7 @@ class TDGAlgorithmProvider(AlgorithmProvider):
             StandardizeRoadLayer(),
             MakeRoadNetwork(),
             CalculateStress(),
+            AddSymbolizedStressLayer(),
             GetCrossStreets(),
             ShortestPathFromLayer(),
             Meld(),

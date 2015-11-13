@@ -1,5 +1,5 @@
 <!DOCTYPE qgis PUBLIC 'http://mrcc.com/qgis.dtd' 'SYSTEM'>
-<qgis version="2.10.1-Pisa" minimumScale="-4.65661e-10" maximumScale="1e+08" simplifyDrawingHints="1" minLabelScale="0" maxLabelScale="1e+08" simplifyDrawingTol="1" simplifyMaxScale="1" hasScaleBasedVisibilityFlag="0" simplifyLocal="1" scaleBasedLabelVisibilityFlag="0">
+<qgis version="2.10.1-Pisa" minimumScale="0" maximumScale="1e+08" simplifyDrawingHints="1" minLabelScale="0" maxLabelScale="1e+08" simplifyDrawingTol="1" simplifyMaxScale="1" hasScaleBasedVisibilityFlag="0" simplifyLocal="1" scaleBasedLabelVisibilityFlag="0">
   <edittypes>
     <edittype widgetv2type="TextEdit" name="road_id">
       <widgetv2config IsMultiline="0" fieldEditable="1" UseHtml="0" labelOnTop="0"/>
@@ -161,13 +161,12 @@
   <renderer-v2 symbollevels="0" type="RuleRenderer">
     <rules key="{17cab675-d27f-4155-af49-10423e527769}">
       <rule filter="one_way = 'ft'" key="{86a63a81-baa6-4234-81ab-3168e92ae346}" symbol="0" label="One way (ft)"/>
-      <rule filter="one_way = 'tf'" key="{2f7c190f-9287-49b4-aa70-6be2be69e12e}" symbol="1" label="One way (ft)"/>
-      <rule filter="COALESCE(one_way,'ft') = 'ft'" key="{2b502e67-3559-4d08-a7ce-7455d9cb9da6}" symbol="2"/>
-      <rule filter="COALESCE(one_way,'tf') = 'tf'" key="{d7f84f39-ea7d-4278-9437-dc593b58634c}" symbol="3"/>
+      <rule filter="one_way = 'tf'" key="{2f7c190f-9287-49b4-aa70-6be2be69e12e}" symbol="1" label="One way (tf)"/>
+      <rule key="{d7f84f39-ea7d-4278-9437-dc593b58634c}" symbol="2"/>
     </rules>
     <symbols>
       <symbol alpha="1" clip_to_extent="1" type="line" name="0">
-        <layer pass="0" class="MarkerLine" locked="0">
+        <layer pass="1" class="MarkerLine" locked="0">
           <prop k="interval" v="12"/>
           <prop k="interval_map_unit_scale" v="0,0"/>
           <prop k="interval_unit" v="MM"/>
@@ -247,7 +246,7 @@
               <prop k="color" v="0,0,0,0"/>
               <prop k="horizontal_anchor_point" v="1"/>
               <prop k="name" v="arrowhead"/>
-              <prop k="offset" v="0,0.6"/>
+              <prop k="offset" v="0,0"/>
               <prop k="offset_map_unit_scale" v="0,0"/>
               <prop k="offset_unit" v="MM"/>
               <prop k="outline_color" v="114,175,215,255"/>
@@ -327,7 +326,7 @@
         </layer>
       </symbol>
       <symbol alpha="1" clip_to_extent="1" type="line" name="1">
-        <layer pass="0" class="MarkerLine" locked="0">
+        <layer pass="1" class="MarkerLine" locked="0">
           <prop k="interval" v="12"/>
           <prop k="interval_map_unit_scale" v="0,0"/>
           <prop k="interval_unit" v="MM"/>
@@ -355,7 +354,10 @@
             <effect type="outerGlow">
               <prop k="blend_mode" v="0"/>
               <prop k="blur_level" v="3"/>
+              <prop k="color1" v="0,0,255,255"/>
+              <prop k="color2" v="0,255,0,255"/>
               <prop k="color_type" v="0"/>
+              <prop k="discrete" v="0"/>
               <prop k="draw_mode" v="2"/>
               <prop k="enabled" v="0"/>
               <prop k="single_color" v="255,255,255,255"/>
@@ -385,7 +387,10 @@
             <effect type="innerGlow">
               <prop k="blend_mode" v="0"/>
               <prop k="blur_level" v="3"/>
+              <prop k="color1" v="0,0,255,255"/>
+              <prop k="color2" v="0,255,0,255"/>
               <prop k="color_type" v="0"/>
+              <prop k="discrete" v="0"/>
               <prop k="draw_mode" v="2"/>
               <prop k="enabled" v="0"/>
               <prop k="single_color" v="255,255,255,255"/>
@@ -401,7 +406,7 @@
               <prop k="color" v="0,0,0,0"/>
               <prop k="horizontal_anchor_point" v="1"/>
               <prop k="name" v="arrowhead"/>
-              <prop k="offset" v="0,0.6"/>
+              <prop k="offset" v="0,0"/>
               <prop k="offset_map_unit_scale" v="0,0"/>
               <prop k="offset_unit" v="MM"/>
               <prop k="outline_color" v="114,175,215,255"/>
@@ -430,7 +435,10 @@
                 <effect type="outerGlow">
                   <prop k="blend_mode" v="0"/>
                   <prop k="blur_level" v="3"/>
+                  <prop k="color1" v="0,0,255,255"/>
+                  <prop k="color2" v="0,255,0,255"/>
                   <prop k="color_type" v="0"/>
+                  <prop k="discrete" v="0"/>
                   <prop k="draw_mode" v="2"/>
                   <prop k="enabled" v="0"/>
                   <prop k="single_color" v="255,255,255,255"/>
@@ -460,7 +468,10 @@
                 <effect type="innerGlow">
                   <prop k="blend_mode" v="0"/>
                   <prop k="blur_level" v="3"/>
+                  <prop k="color1" v="0,0,255,255"/>
+                  <prop k="color2" v="0,255,0,255"/>
                   <prop k="color_type" v="0"/>
+                  <prop k="discrete" v="0"/>
                   <prop k="draw_mode" v="2"/>
                   <prop k="enabled" v="0"/>
                   <prop k="single_color" v="255,255,255,255"/>
@@ -486,88 +497,7 @@
           <prop k="line_style" v="solid"/>
           <prop k="line_width" v="0.5"/>
           <prop k="line_width_unit" v="MM"/>
-          <prop k="offset" v="0.6"/>
-          <prop k="offset_map_unit_scale" v="0,0"/>
-          <prop k="offset_unit" v="MM"/>
-          <prop k="use_custom_dash" v="0"/>
-          <prop k="width_map_unit_scale" v="0,0"/>
-          <effect enabled="0" type="effectStack">
-            <effect type="dropShadow">
-              <prop k="blend_mode" v="13"/>
-              <prop k="blur_level" v="10"/>
-              <prop k="color" v="0,0,0,255"/>
-              <prop k="draw_mode" v="2"/>
-              <prop k="enabled" v="0"/>
-              <prop k="offset_angle" v="135"/>
-              <prop k="offset_distance" v="2"/>
-              <prop k="offset_unit" v="MM"/>
-              <prop k="offset_unit_scale" v="0,0"/>
-              <prop k="transparency" v="0"/>
-            </effect>
-            <effect type="outerGlow">
-              <prop k="blend_mode" v="0"/>
-              <prop k="blur_level" v="3"/>
-              <prop k="color1" v="0,0,255,255"/>
-              <prop k="color2" v="0,255,0,255"/>
-              <prop k="color_type" v="0"/>
-              <prop k="discrete" v="0"/>
-              <prop k="draw_mode" v="2"/>
-              <prop k="enabled" v="0"/>
-              <prop k="single_color" v="255,255,255,255"/>
-              <prop k="spread" v="2"/>
-              <prop k="spread_unit" v="MM"/>
-              <prop k="spread_unit_scale" v="0,0"/>
-              <prop k="transparency" v="0.5"/>
-            </effect>
-            <effect type="drawSource">
-              <prop k="blend_mode" v="0"/>
-              <prop k="draw_mode" v="2"/>
-              <prop k="enabled" v="1"/>
-              <prop k="transparency" v="0"/>
-            </effect>
-            <effect type="innerShadow">
-              <prop k="blend_mode" v="13"/>
-              <prop k="blur_level" v="10"/>
-              <prop k="color" v="0,0,0,255"/>
-              <prop k="draw_mode" v="2"/>
-              <prop k="enabled" v="0"/>
-              <prop k="offset_angle" v="135"/>
-              <prop k="offset_distance" v="2"/>
-              <prop k="offset_unit" v="MM"/>
-              <prop k="offset_unit_scale" v="0,0"/>
-              <prop k="transparency" v="0"/>
-            </effect>
-            <effect type="innerGlow">
-              <prop k="blend_mode" v="0"/>
-              <prop k="blur_level" v="3"/>
-              <prop k="color1" v="0,0,255,255"/>
-              <prop k="color2" v="0,255,0,255"/>
-              <prop k="color_type" v="0"/>
-              <prop k="discrete" v="0"/>
-              <prop k="draw_mode" v="2"/>
-              <prop k="enabled" v="0"/>
-              <prop k="single_color" v="255,255,255,255"/>
-              <prop k="spread" v="2"/>
-              <prop k="spread_unit" v="MM"/>
-              <prop k="spread_unit_scale" v="0,0"/>
-              <prop k="transparency" v="0.5"/>
-            </effect>
-          </effect>
-        </layer>
-      </symbol>
-      <symbol alpha="1" clip_to_extent="1" type="line" name="3">
-        <layer pass="0" class="SimpleLine" locked="0">
-          <prop k="capstyle" v="square"/>
-          <prop k="customdash" v="5;2"/>
-          <prop k="customdash_map_unit_scale" v="0,0"/>
-          <prop k="customdash_unit" v="MM"/>
-          <prop k="draw_inside_polygon" v="0"/>
-          <prop k="joinstyle" v="bevel"/>
-          <prop k="line_color" v="114,175,215,255"/>
-          <prop k="line_style" v="solid"/>
-          <prop k="line_width" v="0.5"/>
-          <prop k="line_width_unit" v="MM"/>
-          <prop k="offset" v="-0.6"/>
+          <prop k="offset" v="5.55112e-17"/>
           <prop k="offset_map_unit_scale" v="0,0"/>
           <prop k="offset_unit" v="MM"/>
           <prop k="use_custom_dash" v="0"/>
@@ -653,7 +583,10 @@
       <effect type="outerGlow">
         <prop k="blend_mode" v="0"/>
         <prop k="blur_level" v="3"/>
+        <prop k="color1" v="0,0,255,255"/>
+        <prop k="color2" v="0,255,0,255"/>
         <prop k="color_type" v="0"/>
+        <prop k="discrete" v="0"/>
         <prop k="draw_mode" v="2"/>
         <prop k="enabled" v="0"/>
         <prop k="single_color" v="255,255,255,255"/>
@@ -683,7 +616,10 @@
       <effect type="innerGlow">
         <prop k="blend_mode" v="0"/>
         <prop k="blur_level" v="3"/>
+        <prop k="color1" v="0,0,255,255"/>
+        <prop k="color2" v="0,255,0,255"/>
         <prop k="color_type" v="0"/>
+        <prop k="discrete" v="0"/>
         <prop k="draw_mode" v="2"/>
         <prop k="enabled" v="0"/>
         <prop k="single_color" v="255,255,255,255"/>
@@ -749,7 +685,7 @@
     <property key="labeling/maxCurvedCharAngleIn" value="20"/>
     <property key="labeling/maxCurvedCharAngleOut" value="-20"/>
     <property key="labeling/maxNumLabels" value="2000"/>
-    <property key="labeling/mergeLines" value="false"/>
+    <property key="labeling/mergeLines" value="true"/>
     <property key="labeling/minFeatureSize" value="0"/>
     <property key="labeling/multilineAlign" value="0"/>
     <property key="labeling/multilineHeight" value="1"/>
@@ -863,8 +799,9 @@
     <selectedonly on=""/>
   </labelattributes>
   <SingleCategoryDiagramRenderer diagramType="Pie">
-    <DiagramCategory penColor="#000000" labelPlacementMethod="XHeight" penWidth="0" diagramOrientation="Up" minimumSize="0" barWidth="5" penAlpha="255" maxScaleDenominator="1e+08" backgroundColor="#ffffff" transparency="0" width="15" scaleDependency="Area" backgroundAlpha="255" angleOffset="1440" scaleBasedVisibility="0" enabled="0" height="15" sizeType="MM" minScaleDenominator="-4.65661e-10">
+    <DiagramCategory penColor="#000000" labelPlacementMethod="XHeight" penWidth="0" diagramOrientation="Up" minimumSize="0" barWidth="5" penAlpha="255" maxScaleDenominator="1e+08" backgroundColor="#ffffff" transparency="0" width="15" scaleDependency="Area" backgroundAlpha="255" angleOffset="1440" scaleBasedVisibility="0" enabled="0" height="15" sizeType="MM" minScaleDenominator="0">
       <fontProperties description="Ubuntu,11,-1,5,50,0,0,0,0,0" style=""/>
+      <attribute field="" color="#000000" label=""/>
     </DiagramCategory>
   </SingleCategoryDiagramRenderer>
   <DiagramLayerSettings yPosColumn="-1" linePlacementFlags="10" placement="2" dist="0" xPosColumn="-1" priority="0" obstacle="0" showAll="1"/>

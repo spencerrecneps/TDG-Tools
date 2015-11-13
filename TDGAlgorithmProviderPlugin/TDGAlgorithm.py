@@ -25,6 +25,7 @@ __copyright__ = '(C) 2015, Spencer Gardner'
 
 __revision__ = '$Format:%H$'
 
+import os
 from PyQt4.QtCore import QSettings
 from qgis.core import *
 
@@ -44,6 +45,7 @@ class TDGAlgorithm(GeoAlgorithm):
     """
 
     # stylePath = QgsApplication.pluginPath() + '/TDGAlgorithmProviderPlugin/styles/'
+    stylePath = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'styles')
 
     roadsLayer = None
     roadsTable = None
@@ -170,8 +172,15 @@ class TDGAlgorithm(GeoAlgorithm):
         self.roadsLayer = inLayer
 
     # add roads layer to map with styling
-    def addRoadsToMap(self):
-        # self.roadsLayer.loadNamedStyle(self.stylePath + 'base_roads.qml')
+    def addRoadsToMap(self, qmlFile=None):
+        if qmlFile is None:
+            self.roadsLayer.loadNamedStyle(
+                os.path.join(self.stylePath, 'base_roads.qml')
+            )
+        else:
+            self.roadsLayer.loadNamedStyle(
+                os.path.join(self.stylePath, qmlFile)
+            )
         QgsMapLayerRegistry.instance().addMapLayer(self.roadsLayer)
 
     # add intersections layer to map with styling
@@ -184,6 +193,9 @@ class TDGAlgorithm(GeoAlgorithm):
 
     # add links layer to map with styling
     def addLinksToMap(self):
+        self.linksLayer.loadNamedStyle(
+            os.path.join(self.stylePath, 'net_link.qml')
+        )
         QgsMapLayerRegistry.instance().addMapLayer(self.linksLayer)
 
     # check that a crs is a standard postgis authid
