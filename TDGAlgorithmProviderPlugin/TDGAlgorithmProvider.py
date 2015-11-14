@@ -33,6 +33,7 @@ from processing.core.ProcessingConfig import Setting, ProcessingConfig
 from processing.script.ScriptUtils import ScriptUtils
 
 from ImportRoadLayer import ImportRoadLayer
+from SymbolizeRoadLayer import SymbolizeRoadLayer
 from StandardizeRoadLayer import StandardizeRoadLayer
 from MakeRoadNetwork import MakeRoadNetwork
 from CalculateStress import CalculateStress
@@ -46,6 +47,7 @@ from Meld import Meld
 from AddTdgId import AddTdgId
 from CopyViaTDGId import CopyViaTDGId
 from CopyRoadNetwork import CopyRoadNetwork
+from SymbolizeNetworkLinks import SymbolizeNetworkLinks
 
 pluginPath = os.path.normpath(os.path.dirname(__file__))
 
@@ -60,6 +62,7 @@ class TDGAlgorithmProvider(AlgorithmProvider):
         # Load algorithms
         self.alglist = [
             ImportRoadLayer(),
+            SymbolizeRoadLayer(),
             StandardizeRoadLayer(),
             MakeRoadNetwork(),
             CalculateStress(),
@@ -72,7 +75,8 @@ class TDGAlgorithmProvider(AlgorithmProvider):
             CalculateNetworkCostFromTime(),
             AddTdgId(),
             CopyViaTDGId(),
-            CopyRoadNetwork()]
+            CopyRoadNetwork(),
+            SymbolizeNetworkLinks()]
         for alg in self.alglist:
             alg.provider = self
 

@@ -46,6 +46,7 @@ class TDGAlgorithm(GeoAlgorithm):
 
     # stylePath = QgsApplication.pluginPath() + '/TDGAlgorithmProviderPlugin/styles/'
     stylePath = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'styles')
+    helpPath = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'Documentation')
 
     roadsLayer = None
     roadsTable = None
