@@ -25,7 +25,10 @@ __copyright__ = '(C) 2015, Spencer Gardner'
 
 __revision__ = '$Format:%H$'
 
+import os
+import markdown2
 from qgis.core import *
+
 import processing
 from processing.core.GeoAlgorithmExecutionException import GeoAlgorithmExecutionException
 from processing.core.parameters import ParameterVector, ParameterBoolean, ParameterNumber
@@ -46,6 +49,10 @@ class CalculateNetworkCostFromTime(TDGAlgorithm):
     ROADS_LAYER = 'ROADS_LAYER'
     SPEED = 'SPEED'
     FEET_PER_SECOND = 'FEET_PER_SECOND'
+
+    def help(self):
+        html = markdown2.markdown_path(os.path.join(self.helpPath,'Calculate Network Cost From Time.md'))
+        return True, html
 
     def defineCharacteristics(self):
         """Here we define the inputs and output of the algorithm, along

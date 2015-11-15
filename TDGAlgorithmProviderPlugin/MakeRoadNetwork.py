@@ -25,6 +25,8 @@ __copyright__ = '(C) 2015, Spencer Gardner'
 
 __revision__ = '$Format:%H$'
 
+import os
+import markdown2
 from PyQt4.QtCore import QSettings, QVariant
 from qgis.core import *
 
@@ -49,6 +51,9 @@ class MakeRoadNetwork(TDGAlgorithm):
     ROADS_LAYER = 'ROADS_LAYER'
     ADDTOMAP = 'ADDTOMAP'
 
+    def help(self):
+        html = markdown2.markdown_path(os.path.join(self.helpPath,'Make Road Network.md'))
+        return True, html
 
     def defineCharacteristics(self):
         """Here we define the inputs and output of the algorithm, along

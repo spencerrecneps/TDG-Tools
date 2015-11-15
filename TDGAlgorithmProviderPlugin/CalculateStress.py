@@ -26,7 +26,7 @@ __copyright__ = '(C) 2015, Spencer Gardner'
 __revision__ = '$Format:%H$'
 
 import os
-from qgis.core import QgsDataSourceURI, QgsVectorLayerImport, QGis, QgsFeature, QgsGeometry
+import markdown2
 
 from TDGAlgorithm import TDGAlgorithm
 import processing
@@ -35,7 +35,6 @@ from processing.core.parameters import ParameterVector
 from processing.core.parameters import ParameterBoolean
 from processing.tools import dataobjects
 
-import markdown2
 
 class CalculateStress(TDGAlgorithm):
     """This algorithm takes an input road dataset and calculates

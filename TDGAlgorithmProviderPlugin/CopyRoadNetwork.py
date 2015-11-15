@@ -25,7 +25,10 @@ __copyright__ = '(C) 2015, Spencer Gardner'
 
 __revision__ = '$Format:%H$'
 
+import os
+import markdown2
 from qgis.core import *
+
 from TDGAlgorithm import TDGAlgorithm
 import processing
 from processing.core.GeoAlgorithmExecutionException import GeoAlgorithmExecutionException
@@ -45,6 +48,10 @@ class CopyRoadNetwork(TDGAlgorithm):
     NEW_ROAD_LAYER = 'NEW_ROAD_LAYER'
     OVERWRITE = 'OVERWRITE'
     ADDTOMAP = 'ADDTOMAP'
+
+    def help(self):
+        html = markdown2.markdown_path(os.path.join(self.helpPath,'Copy Road Network.md'))
+        return True, html
 
     def defineCharacteristics(self):
         """Here we define the inputs and output of the algorithm, along

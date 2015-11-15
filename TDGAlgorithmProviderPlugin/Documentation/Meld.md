@@ -1,25 +1,17 @@
 #Meld
 
 ##Parameters
-Name         | Type
--------------|----------
-TARGET_LAYER | Line layer
-SOURCE_LAYER | Line layer
-TOLERANCE    | Number
-OUT_LAYER    | File path
-KEEP_NULLS   | Checkbox
+**Target layer** - The layer to which information should be joined.
 
-**TARGET_LAYER** - The layer to which information should be joined.
+**Source layer** - The layer with information to be joined to the target features.
 
-**SOURCE_LAYER** - The layer with information to be joined to the target features.
-
-**TOLERANCE** - The search distance for finding matching features. (Given in
+**Tolerance** - The search distance for finding matching features. (Given in
 units of the coordinate system.)
 
-**OUT_LAYER** - The location to save the output layer (if blank, saves as a
+**Output file** - The location to save the output layer (if blank, saves as a
 temporary layer)
 
-**KEEP_NULLS** - Whether to keep target features that do not have a match in the
+**Keep nulls** - Whether to keep target features that do not have a match in the
 source layer.
 
 ##Description
@@ -36,5 +28,5 @@ A tie is broken by the average distance from all three points.
 
 As an example, imagine you received a layer representing all the bike lanes in
 a municipality, but the lines don't line up perfectly with the roads layer
-so a spaital join won't work. You can use this tool to assign the bike
+so a spatial join won't work. You can use this tool to assign the bike
 lane data to the roads that they overlap with.

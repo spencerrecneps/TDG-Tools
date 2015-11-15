@@ -25,6 +25,8 @@ __copyright__ = '(C) 2015, Spencer Gardner'
 
 __revision__ = '$Format:%H$'
 
+import os
+import markdown2
 from qgis.core import *
 
 import processing
@@ -48,6 +50,10 @@ class CopyViaTDGId(GeoAlgorithm):
     SOURCE_FIELD = 'SOURCE_FIELD'
     TARGET_LAYER = 'TARGET_LAYER'
     TARGET_FIELD = 'TARGET_FIELD'
+
+    def help(self):
+        html = markdown2.markdown_path(os.path.join(self.helpPath,'Copy Via TDG ID.md'))
+        return True, html
 
     def defineCharacteristics(self):
         """Here we define the inputs and output of the algorithm, along
@@ -79,7 +85,7 @@ class CopyViaTDGId(GeoAlgorithm):
 
         # Field with target values
         self.addParameter(ParameterTableField(self.TARGET_FIELD,
-            self.tr('Field with target values'),
+            self.tr('Field to copy values to'),
             parent=self.TARGET_LAYER,
             optional=False))
 

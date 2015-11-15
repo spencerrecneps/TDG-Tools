@@ -25,10 +25,13 @@ __copyright__ = '(C) 2015, Spencer Gardner'
 
 __revision__ = '$Format:%H$'
 
+import os
+import uuid
+import markdown2
 from PyQt4.QtCore import QVariant
 from qgis.core import *
-import uuid
 
+from TDGAlgorithm import TDGAlgorithm
 import processing
 from processing.core.GeoAlgorithm import GeoAlgorithm
 from processing.core.GeoAlgorithmExecutionException import GeoAlgorithmExecutionException
@@ -36,7 +39,7 @@ from processing.core.parameters import ParameterVector
 from processing.tools import dataobjects, vector
 
 
-class AddTdgId(GeoAlgorithm):
+class AddTdgId(TDGAlgorithm):
     """This algorithm takes an input dataset and adds a column name
     'tdg_id' with UUID values.
     """
@@ -46,6 +49,10 @@ class AddTdgId(GeoAlgorithm):
     # calling from the QGIS console.
 
     INPUT_LAYER = 'INPUT_LAYER'
+
+    def help(self):
+        html = markdown2.markdown_path(os.path.join(self.helpPath,'Add TDG ID.md'))
+        return True, html
 
     def defineCharacteristics(self):
         """Here we define the inputs and output of the algorithm, along
