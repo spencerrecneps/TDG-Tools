@@ -3,20 +3,24 @@
 ##Parameters
 **Target layer** - The layer to which information should be joined.
 
+**Field with target IDs** - The field in the target data that uniquely identifies features.
+
 **Source layer** - The layer with information to be joined to the target features.
 
-**Tolerance** - The search distance for finding matching features. (Given in
+**Field with source IDs** - The field in the source data that uniquely identifies features.
+
+**Search tolerance** - The search distance for finding matching features. (Given in
 units of the coordinate system.)
 
 **Output file** - The location to save the output layer (if blank, saves as a
 temporary layer)
 
-**Keep nulls** - Whether to keep target features that do not have a match in the
+**Keep non-matching features** - Whether to keep target features that do not have a match in the
 source layer.
 
 ##Description
 
-Meld is a tool to associate information from one set of lines onto a set of
+Meld associates information from one set of lines onto a set of
 similar, but not exactly overlapping lines.
 
 A match is determined using the following logic. For each target feature, a

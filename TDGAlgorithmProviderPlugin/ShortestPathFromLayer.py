@@ -25,6 +25,8 @@ __copyright__ = '(C) 2015, Spencer Gardner'
 
 __revision__ = '$Format:%H$'
 
+import os
+import markdown2
 from PyQt4.QtCore import QSettings, QVariant
 from qgis.core import *
 
@@ -65,6 +67,11 @@ class ShortestPathFromLayer(TDGAlgorithm):
     ROUTES_LAYER = 'ROUTES_LAYER'
     KEEP_SUMS = 'KEEP_SUMS'
     SUMS_LAYER = 'SUMS_LAYER'
+
+
+    def help(self):
+        html = markdown2.markdown_path(os.path.join(self.helpPath,'Shortest Path from Layer.md'))
+        return True, html
 
 
     def defineCharacteristics(self):

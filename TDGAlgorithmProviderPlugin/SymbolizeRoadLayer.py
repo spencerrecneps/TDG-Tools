@@ -26,6 +26,7 @@ __copyright__ = '(C) 2015, Spencer Gardner'
 __revision__ = '$Format:%H$'
 
 import os
+import markdown2
 from qgis.core import *
 
 from TDGAlgorithm import TDGAlgorithm

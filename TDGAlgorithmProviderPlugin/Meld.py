@@ -25,12 +25,14 @@ __copyright__ = '(C) 2015, Spencer Gardner'
 
 __revision__ = '$Format:%H$'
 
+import os
+import markdown2
 from PyQt4.QtCore import QVariant
 from qgis.core import *
 from math import sqrt
 
+from TDGAlgorithm import TDGAlgorithm
 import processing
-from processing.core.GeoAlgorithm import GeoAlgorithm
 from processing.core.GeoAlgorithmExecutionException import GeoAlgorithmExecutionException
 from processing.core.parameters import ParameterVector
 from processing.core.parameters import ParameterBoolean
@@ -39,7 +41,7 @@ from processing.core.parameters import ParameterTableField
 from processing.core.outputs import OutputVector
 from processing.tools import dataobjects, vector
 
-class Meld(GeoAlgorithm):
+class Meld(TDGAlgorithm):
     """This algorithm takes an target line dataset and a
     source line dataset. It identifies the most likely candidate
     for a match based on the spatial mismatch between the two at
@@ -58,6 +60,10 @@ class Meld(GeoAlgorithm):
     OUT_LAYER = 'OUT_LAYER'
     KEEP_NULLS = 'KEEP_NULLS'
 
+
+    def help(self):
+        html = markdown2.markdown_path(os.path.join(self.helpPath,'Meld.md'))
+        return True, html
 
 
     def defineCharacteristics(self):

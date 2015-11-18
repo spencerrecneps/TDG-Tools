@@ -20,7 +20,7 @@
 Imports a road dataset into a PostGIS database. The tool makes a couple of
 key changes as it imports:
 
-1. Adds a TDG ID column to the table
+1. Adds a TDG ID column to the table if one doesn't already exist.
 2. Converts the line geometries to LINESTRING type, as opposed to
 MULTILINESTRING. This is necessary for many of the operations that other tools
 perform.

@@ -25,6 +25,8 @@ __copyright__ = '(C) 2015, Spencer Gardner'
 
 __revision__ = '$Format:%H$'
 
+import os
+import markdown2
 from PyQt4.QtCore import QSettings
 from qgis.core import *
 
