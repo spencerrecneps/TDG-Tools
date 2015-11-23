@@ -76,7 +76,7 @@ class CalculateNetworkCostFromTime(TDGAlgorithm):
             ParameterNumber(
                 self.SPEED,
                 self.tr('Travel speed (default: miles per hour)'),
-                minValue=0
+                minValue=0.0
             )
         )
 
@@ -97,7 +97,7 @@ class CalculateNetworkCostFromTime(TDGAlgorithm):
 
         # set up the sql call and run
         progress.setInfo('Calculating network costs')
-        sql = "select tdg.tdgNetworkCostFromTime('%s.%s',%d,%s)" % (self.schema,self.roadsTable,speed,fps)
+        sql = "select tdg.tdgNetworkCostFromTime('%s.%s',%0.3f,%s)" % (self.schema,self.roadsTable,speed,fps)
         progress.setInfo('Database call was: ')
         progress.setInfo(sql)
         try:

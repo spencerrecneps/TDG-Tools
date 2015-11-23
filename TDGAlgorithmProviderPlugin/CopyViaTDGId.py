@@ -29,15 +29,15 @@ import os
 import markdown2
 from qgis.core import *
 
+from TDGAlgorithm import TDGAlgorithm
 import processing
-from processing.core.GeoAlgorithm import GeoAlgorithm
 from processing.core.GeoAlgorithmExecutionException import GeoAlgorithmExecutionException
 from processing.core.parameters import ParameterVector
 from processing.core.parameters import ParameterTableField
 from processing.tools import dataobjects, vector
 
 
-class CopyViaTDGId(GeoAlgorithm):
+class CopyViaTDGId(TDGAlgorithm):
     """This algorithm copies values from one dataset to another using features
     that have the same tdg_id values.
     """
