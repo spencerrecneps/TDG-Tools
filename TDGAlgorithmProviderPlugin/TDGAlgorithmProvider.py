@@ -49,6 +49,7 @@ from CopyViaTDGId import CopyViaTDGId
 from CopyRoadNetwork import CopyRoadNetwork
 from SymbolizeNetworkLinks import SymbolizeNetworkLinks
 from RoadSlope import RoadSlope
+from StationDensity import StationDensity
 
 pluginPath = os.path.normpath(os.path.dirname(__file__))
 
@@ -78,7 +79,8 @@ class TDGAlgorithmProvider(AlgorithmProvider):
             CopyViaTDGId(),
             CopyRoadNetwork(),
             SymbolizeNetworkLinks(),
-            RoadSlope()]
+            RoadSlope(),
+            StationDensity()]
         for alg in self.alglist:
             alg.provider = self
 
