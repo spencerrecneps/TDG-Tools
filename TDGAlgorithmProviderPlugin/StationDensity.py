@@ -108,11 +108,11 @@ class StationDensity(TDGAlgorithm):
         count = 0
         totalCount = len(stationFeats)
         progress.setInfo('%i target features identified' % totalCount)
-        totalDistance = 0
+        averages = []
         for stationId, station in stationFeatures.iteritems():
             count += 1
             progress.setPercentage(count/totalCount)
-            geom = QgsGeometry(station.get('feature').geometry())
+            geom = QgsGeometry(station.get('feature').geometry().convertToType(QGis.Point,destMultipart=False))
 
             # get nearest neighbors using cluster tolerance and the
             # spatial index (tolerance + 1 because it will also return
@@ -128,9 +128,7 @@ class StationDensity(TDGAlgorithm):
                 if distance > 0:    # excludes a self-match
                     station['distances'].append(distance)
 
-            totalDistance += sum(station.get('distances'))
+            averages.append(sum(station.get('distances'))/len(station.get('distances')))
 
-            # need to refine this final measure
-        progress.setInfo('Total distance: %d' % (totalDistance))
-        progress.setInfo('Total stations: %d' % (totalCount))
-        progress.setInfo('Compactness: %d' % (totalDistance/totalCount))
+        # need to refine this final measure
+        progress.setInfo('Average distance: %0.1f' % (sum(averages)/len(averages)))
