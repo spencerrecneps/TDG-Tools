@@ -1,24 +1,3 @@
-# drop table generated.systems;
-#
-# create table generated.systems (
-#     id serial primary key,
-#     system_name TEXT,
-#     url TEXT,
-#     lat TEXT,
-#     lon TEXT,
-#     srid INTEGER,
-#     tree TEXT[],
-#     table_name TEXT
-# );
-#
-#
-# insert into generated.systems (system_name,url,lat,lon,srid,tree,table_name)
-# values
-# ('seattle_pronto','https://secure.prontocycleshare.com/data/stations.json','la','lo',4326,'{stations}','seattle_pronto'),
-# ('chicago_divvy','https://www.divvybikes.com/stations/json','latitude','longitude',4326,'{stationBeanList}','chicago_divvy');
-
-
-
 CREATE OR REPLACE FUNCTION tdg.tdgUpdateBikeShareStations (
     system_table REGCLASS,
     system_name TEXT DEFAULT NULL
