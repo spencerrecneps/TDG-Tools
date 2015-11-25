@@ -23,6 +23,15 @@ def get_jsonparsed_data(url):
     return json.loads(data)
 
 
+def createUniqueColumnName(colName, colList):
+    name = str(colName)
+    i = -1
+    while name in colList:
+        i += 1
+        name = str(colName) + '_' + str(i)
+    return name
+
+
 def is_number(s):
     if s is None:
         return True
@@ -103,14 +112,11 @@ for system in systems:
                     else:
                         columnTypes[col] = 'text'
 
+        # set up the create statement with all text columns
         plpy.info('    -> Building table')
-        # sql = 'create table generated.%s ( \
-        #     id serial primary key, \
-        #     geom geometry(point,%d)' % (system.get('table_name'), system.get('srid'))
         sql = 'create table received.%s ( \
             geom geometry(point,%d)' % (plpy.quote_ident(system.get('table_name')), system.get('srid'))
         for col, colType in columnTypes.iteritems():
-            # sql += ',"%s" %s' % (col,colType)
             sql += ',%s text' % plpy.quote_ident(col)
         sql += ')'
 
@@ -125,9 +131,6 @@ for system in systems:
         values = ''
         cols = columnTypes.keys()
         cols.sort()
-        plpy.info(str(columnTypes))
-        plpy.info(str(columnTypes.keys()))
-        plpy.info(str(cols))
         sql = 'insert into received.%s (' % plpy.quote_ident(system.get('table_name'))
         for col in cols:
             sql += '%s,' % plpy.quote_ident(col)
@@ -137,20 +140,34 @@ for system in systems:
             sql += '('
             for col in cols:
                 sql += "%s," % plpy.quote_nullable(str(row.get(col)))
-                # if columnTypes.get(col) == 'text':
-                #     sql += "%s," % plpy.quote_nullable(str(row.get(col)))
-                # else:
-                #     sql += '%s,' % row.get(col)
             sql = sql[:-1]
             sql += '),'
         sql = sql[:-1]
+        plpy.execute(sql)
 
+        # now try to cast each column to its proper type, catching fails
+        for col, colType in columnTypes.iteritems():
+            try:
+                sql = 'alter table %s ' % plpy.quote_ident(system.get('table_name'))
+                sql += 'alter column %s ' % plpy.quote_ident(col)
+                sql += 'type %s ' % colType
+                sql += 'using %s::%s' % (plpy.quote_ident(col),colType)
+                plpy.execute(sql)
+            except:
+                pass
+
+        # add id column and primary key
+        idCol = createUniqueColumnName('id',cols)
+        sql = 'alter table %s add column %s serial primary key' % (plpy.quote_ident(system.get('table_name')),idCol)
         plpy.info(sql)
         plpy.execute(sql)
 
-        # now try to cast each column to a different type, catching fails
-
-
+        # and finally set the geom
+        sql = 'update %s set geom = st_setSRID(st_makepoint(' % plpy.quote_ident(system.get('table_name'))
+        sql += '%s,%s)' % (plpy.quote_ident(system.get('lon')),plpy.quote_ident(system.get('lat')))
+        sql += ',%d)' % system.get('srid')
+        plpy.info(sql)
+        plpy.execute(sql)
 
 return True
 
