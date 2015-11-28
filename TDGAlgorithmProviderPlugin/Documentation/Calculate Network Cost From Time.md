@@ -1,20 +1,13 @@
 #Calculate Network Cost from Time
 
 ##Parameters
-Name         | Type
--------------|----------
-ROADS_LAYER  | Roads layer
-SPEED | Number
-FEET_PER_SECOND | Boolean
+**Roads layer** - The roads layer of the network dataset.
 
-**ROADS_LAYER** - The roads layer of the network dataset.
+**Speed** - The assumed speed (defaults to miles per hour.)
 
-**SPEED** - The assumed speed (defaults to miles per hour.)
-
-**FEET_PER_SECOND** - Indicates whether the speed measure is in feet per second.
+**Feet per second** - Indicates whether the speed measure is in feet per second.
 
 ##Description
-
 Assigns a cost to each link in the network based on the amount of time it takes
 to traverse an associated road segment. Only links that are associated to
 road segments are given a cost. (i.e. links that represent movements through

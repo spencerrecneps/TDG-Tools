@@ -1,11 +1,7 @@
 #Add Symbolized Stress Layer
 
 ##Parameters
-Name         | Type
--------------|----------
-ROADS_LAYER  | Line layer
-
-**ROADS_LAYER** - The road layer to symbolize for traffic stress.
+**Roads layer** - The road layer to symbolize for traffic stress.
 
 ##Description
 

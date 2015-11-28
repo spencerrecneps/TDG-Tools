@@ -1,14 +1,9 @@
 #Add TDG ID
 
 ##Parameters
-Name         | Type
--------------|----------
-INPUT_LAYER  | Input layer
-
-**INPUT_LAYER** - The layer to add the TDG ID to.
+**Input layer** - The layer to add the TDG ID to.
 
 ##Description
-
 Adds a column named tdg_id to the input layer and populates with a unique
 identifier. The identifier is a set of numbers and letters 36 characters long
 that is unique across the entire company.

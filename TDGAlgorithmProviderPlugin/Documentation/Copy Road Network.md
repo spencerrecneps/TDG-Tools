@@ -12,7 +12,6 @@
 **Add to map** - Whether to add the new road layers to the map.
 
 ##Description
-
 Copies an existing TDG road network. This can be useful for evaluating
 alternatives, where a base dataset represents existing conditions and
 alternatives represent minor changes from the base condition.

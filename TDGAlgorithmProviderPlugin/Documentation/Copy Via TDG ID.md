@@ -10,7 +10,6 @@
 **Target field** - The field to copy values to.
 
 ##Description
-
 Copies values from the source layer to the target layer based on shared
 TDG IDs in both datasets. Both source and target layers must have a field
 named tdg_id that holds TDG IDs. Values are only copied where a match is

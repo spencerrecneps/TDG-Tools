@@ -65,6 +65,12 @@ class StandardizeRoadLayer(TDGAlgorithm):
     OVERWRITE = 'OVERWRITE'
     DELETE_SOURCE = 'DELETE_SOURCE'
 
+
+    def help(self):
+        html = markdown2.markdown_path(os.path.join(self.helpPath,'Standardize Road Layer.md'))
+        return True, html
+
+
     def defineCharacteristics(self):
         """Here we define the inputs and output of the algorithm, along
         with some other properties.

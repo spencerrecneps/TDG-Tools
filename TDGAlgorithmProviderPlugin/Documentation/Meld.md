@@ -19,7 +19,6 @@ temporary layer)
 source layer.
 
 ##Description
-
 Meld associates information from one set of lines onto a set of
 similar, but not exactly overlapping lines.
 

@@ -47,6 +47,12 @@ class SymbolizeNetworkLinks(TDGAlgorithm):
 
     ROADS_LAYER = 'ROADS_LAYER'
 
+
+    def help(self):
+        html = markdown2.markdown_path(os.path.join(self.helpPath,'Symbolize Network Links.md'))
+        return True, html
+
+
     def defineCharacteristics(self):
         """Here we define the inputs and output of the algorithm, along
         with some other properties.

@@ -65,6 +65,11 @@ class TravelShed(TDGAlgorithm):
     LINE_LAYER = 'LINE_LAYER'
 
 
+    def help(self):
+        html = markdown2.markdown_path(os.path.join(self.helpPath,'Calculate Travel Shed.md'))
+        return True, html
+
+
     def defineCharacteristics(self):
         """Here we define the inputs and output of the algorithm, along
         with some other properties.

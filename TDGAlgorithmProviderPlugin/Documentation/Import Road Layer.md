@@ -16,7 +16,6 @@
 **Target CRS** - The projection to save the data to.
 
 ##Description
-
 Imports a road dataset into a PostGIS database. The tool makes a couple of
 key changes as it imports:
 

@@ -30,7 +30,6 @@ the number of shortest routes that use a given segment of roadway.
 (creates a temporary layer if left blank)
 
 ##Description
-
 Calculates a shortest path from each point in the destinations layer to every
 other point in the layer. If a stress level is given the tool ignores road
 segments that exceed the given stress.

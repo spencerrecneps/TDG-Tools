@@ -1,5 +1,4 @@
 #Elevation Climb
-
 **[This tool has not been fully developed]**
 
 ##Parameters
@@ -10,6 +9,5 @@
 **Interval** - The interval.
 
 ##Description
-
 Will calculate the total climb for each line segment based on intervals
 defined by the user.
