@@ -6,7 +6,7 @@ DECLARE
 
 BEGIN
     RAISE NOTICE 'Checking % exists',input_table_;
-    EXECUTE 'SELECT '||input_table_||'::REGCLASS';
+    EXECUTE 'SELECT '||quote_literal(input_table_)||'::REGCLASS';
     RETURN 't';
 EXCEPTION
     WHEN undefined_table THEN

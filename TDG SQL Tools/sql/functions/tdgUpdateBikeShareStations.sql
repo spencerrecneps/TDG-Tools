@@ -19,7 +19,7 @@ def get_jsonparsed_data(url):
        object.
     """
     response = urlopen(url)
-    data = str(response.read())
+    data = unicode(response.read(), 'utf-8')
     return json.loads(data)
 
 
@@ -75,7 +75,7 @@ systems = plpy.execute('select * from %s;' % plpy.quote_ident(systemTable))
 stationData = None
 for system in systems:
     if systemName is None or systemName == system.get('system_name'):
-        plpy.info('Retreiving %s' % system.get('system_name'))
+        plpy.info(u'Retreiving %s' % system.get('system_name'))
 
         # grab json from url and save as an object
         data = get_jsonparsed_data(system.get('url'))
@@ -87,10 +87,11 @@ for system in systems:
             trunk = trunk.get(limb)
         stationData = trunk
 
-        # drop existing table
-        plpy.execute('drop table if exists %s' % system.get('table_name'))
+        # # drop existing table
+        # plpy.execute(u'drop table if exists %s' % system.get('table_name'))
+
         # set column types
-        plpy.info('    -> Setting column types')
+        plpy.info(u'    -> Setting column types')
         columnTypes = {}
         for row in stationData:
             for col, val in row.iteritems():
@@ -115,32 +116,38 @@ for system in systems:
 
         # set up the create statement with all text columns
         plpy.info('    -> Building table')
-        sql = 'create table received.%s ( \
+        sql = u'create table received.%s ( \
             geom geometry(point,%d)' % (plpy.quote_ident(system.get('table_name')), system.get('srid'))
+        sql += u',retrieval_date date'
         for col, colType in columnTypes.iteritems():
-            sql += ',%s text' % plpy.quote_ident(col)
-        sql += ')'
+            sql += u',%s text' % plpy.quote_ident(col)
+        sql += u')'
 
         # drop old table if exists
-        plpy.execute('drop table if exists %s' % plpy.quote_ident(system.get('table_name')))
+        # plpy.execute(u'drop table if exists %s' % plpy.quote_ident(system.get('table_name')))
+        # delete any stations retrieved today (if table exists)
+        if plpy.execute(u'select tdgTableCheck(%s)' % plpy.quote_literal(system.get('table_name'))):
+            plpy.execute(u'delete from %s where retrieval_date = current_date' % plpy.quote_ident(system.get('table_name')))
 
         # create new table
         plpy.execute(sql)
 
         # insert new values
-        plpy.info('    -> Inserting data')
-        values = ''
+        plpy.info(u'    -> Inserting data')
+        values = u''
         cols = columnTypes.keys()
         cols.sort()
-        sql = 'insert into received.%s (' % plpy.quote_ident(system.get('table_name'))
+        sql = u'insert into received.%s (' % plpy.quote_ident(system.get('table_name'))
         for col in cols:
             sql += '%s,' % plpy.quote_ident(col)
         sql = sql[:-1]
-        sql += ') values '
+        sql += u') values '
         for row in stationData:
-            sql += '('
+            sql += u'('
             for col in cols:
-                sql += "%s," % plpy.quote_nullable(str(row.get(col)))
+                val = unicode(row.get(col))
+                val = val.encode('ascii','ignore')
+                sql += u"%s," % plpy.quote_nullable(val)
             sql = sql[:-1]
             sql += '),'
         sql = sql[:-1]
@@ -149,26 +156,29 @@ for system in systems:
         # now try to cast each column to its proper type, catching fails
         for col, colType in columnTypes.iteritems():
             try:
-                sql = 'alter table %s ' % plpy.quote_ident(system.get('table_name'))
-                sql += 'alter column %s ' % plpy.quote_ident(col)
-                sql += 'type %s ' % colType
-                sql += 'using %s::%s' % (plpy.quote_ident(col),colType)
+                sql = u'alter table %s ' % plpy.quote_ident(system.get('table_name'))
+                sql += u'alter column %s ' % plpy.quote_ident(col)
+                sql += u'type %s ' % colType
+                sql += u'using %s::%s' % (plpy.quote_ident(col),colType)
                 plpy.execute(sql)
             except:
                 pass
 
         # add id column and primary key
         idCol = createUniqueColumnName('id',cols)
-        sql = 'alter table %s add column %s serial primary key' % (plpy.quote_ident(system.get('table_name')),idCol)
-        plpy.info(sql)
+        sql = u'alter table %s add column %s serial primary key' % (plpy.quote_ident(system.get('table_name')),idCol)
         plpy.execute(sql)
 
-        # and finally set the geom
-        sql = 'update %s set geom = st_setSRID(st_makepoint(' % plpy.quote_ident(system.get('table_name'))
-        sql += '%s,%s)' % (plpy.quote_ident(system.get('lon')),plpy.quote_ident(system.get('lat')))
-        sql += ',%d)' % system.get('srid')
-        plpy.info(sql)
+        # set the geom
+        sql = u'update %s set geom = st_setSRID(st_makepoint(' % plpy.quote_ident(system.get('table_name'))
+        sql += u'%s,%s)' % (plpy.quote_ident(system.get('lon')),plpy.quote_ident(system.get('lat')))
+        sql += u',%d)' % system.get(u'srid')
         plpy.execute(sql)
+
+        # and finally set the retrieval dates
+        sql = u'update %s set retrieval_date = current_date' % plpy.quote_ident(system.get('table_name'))
+        plpy.execute(sql)
+
 
 return True
 
