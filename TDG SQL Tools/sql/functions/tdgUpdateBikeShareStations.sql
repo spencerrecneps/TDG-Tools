@@ -37,6 +37,10 @@ def is_number(s):
         return True
     if isinstance(s,bool):
         return False
+    if isinstance(s,list):
+        return False
+    if isinstance(s,dict):
+        return False
     try:
         float(s)
         return True
@@ -78,16 +82,13 @@ for system in systems:
 
         # traverse tree to get station data
         branch = None
-        for limb in system.get('tree'):
-            branch = data.get(limb)
-        if branch is None:
-            stationData = data
-        else:
-            stationData = branch
+        trunk = data
+        for i, limb in enumerate(system.get('tree')):
+            trunk = trunk.get(limb)
+        stationData = trunk
 
         # drop existing table
         plpy.execute('drop table if exists %s' % system.get('table_name'))
-
         # set column types
         plpy.info('    -> Setting column types')
         columnTypes = {}
