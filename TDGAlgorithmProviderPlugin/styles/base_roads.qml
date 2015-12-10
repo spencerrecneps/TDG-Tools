@@ -67,7 +67,7 @@
     <edittype widgetv2type="TextEdit" name="ft_int_lanes_rt_len_ft">
       <widgetv2config IsMultiline="0" fieldEditable="1" UseHtml="0" labelOnTop="0"/>
     </edittype>
-    <edittype widgetv2type="TextEdit" name="ft_int_lanes_rt_radius_speed_mph">
+    <edittype widgetv2type="TextEdit" name="ft_int_lanes_rt_rad_mph">
       <widgetv2config IsMultiline="0" fieldEditable="1" UseHtml="0" labelOnTop="0"/>
     </edittype>
     <edittype widgetv2type="TextEdit" name="ft_int_lanes_bike_wd_ft">
@@ -124,7 +124,7 @@
     <edittype widgetv2type="TextEdit" name="tf_int_lanes_rt_len_ft">
       <widgetv2config IsMultiline="0" fieldEditable="1" UseHtml="0" labelOnTop="0"/>
     </edittype>
-    <edittype widgetv2type="TextEdit" name="tf_int_lanes_rt_radius_speed_mph">
+    <edittype widgetv2type="TextEdit" name="tf_int_lanes_rt_rad_mph">
       <widgetv2config IsMultiline="0" fieldEditable="1" UseHtml="0" labelOnTop="0"/>
     </edittype>
     <edittype widgetv2type="TextEdit" name="tf_int_lanes_bike_wd_ft">

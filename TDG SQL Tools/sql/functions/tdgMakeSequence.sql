@@ -36,6 +36,7 @@ BEGIN
     EXECUTE 'SELECT MAX('||column_name||') FROM '||input_table_||';'
     INTO    seq_max;
     RAISE NOTICE 'Max value: %',seq_max::TEXT;
+    seq_max := seq_max + 1;
 
     -- create sequence
     RAISE NOTICE 'Creating sequence';
@@ -45,7 +46,7 @@ BEGIN
     -- assign as default on the column
     RAISE NOTICE 'Assigning sequence to column %',column_name;
     EXECUTE '
-        ALTER TABLE '||input_table_||' 
+        ALTER TABLE '||input_table_||'
         ALTER COLUMN '||column_name||'
         SET DEFAULT nextval('||quote_literal(seq_name)||'::REGCLASS)';
 

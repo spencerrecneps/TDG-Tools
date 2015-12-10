@@ -36,12 +36,12 @@ BEGIN
     END IF;
 
     -- create new table
-    EXECUTE 'CREATE TABLE '||table_name||' (LIKE '||input_table_||')';
+    EXECUTE 'CREATE TABLE '||table_name||' (LIKE '||input_table_||' INCLUDING ALL)';
     EXECUTE 'INSERT INTO '||table_name||' SELECT * FROM '||input_table_;
 
     -- get pk column from source table and set on new table
     pk_col := tdg.tdgGetPkColumn(input_table_);
-    EXECUTE 'ALTER TABLE '||table_name||' ADD PRIMARY KEY ('||pk_col||')';
+    --EXECUTE 'ALTER TABLE '||table_name||' ADD PRIMARY KEY ('||pk_col||')';
 
     -- set sequence on new table
     EXECUTE 'SELECT tdg.tdgMakeSequence($1)'

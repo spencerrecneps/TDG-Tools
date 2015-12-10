@@ -224,19 +224,19 @@ BEGIN
                 SET     ft_int_stress = 2
                 WHERE   COALESCE(ft_int_lanes_bike_wd_ft,0) >= 4
                 AND     ft_int_lanes_rt_len_ft <= 150
-                AND     ft_int_lanes_rt_radius_speed_mph <= 15
+                AND     ft_int_lanes_rt_rad_mph <= 15
                 AND     ft_int_lanes_bike_straight = 1;
                 UPDATE  %s
                 SET     ft_int_stress = 3
                 WHERE   COALESCE(ft_int_lanes_bike_wd_ft,0) >= 4
                 AND     COALESCE(ft_int_lanes_rt_len_ft,0) > 0
-                AND     ft_int_lanes_rt_radius_speed_mph <= 20
+                AND     ft_int_lanes_rt_rad_mph <= 20
                 AND     ft_int_lanes_bike_straight = 1
                 AND     ft_int_stress IS NOT NULL;
                 UPDATE  %s
                 SET     ft_int_stress = 3
                 WHERE   COALESCE(ft_int_lanes_bike_wd_ft,0) >= 4
-                AND     ft_int_lanes_rt_radius_speed_mph <= 15
+                AND     ft_int_lanes_rt_rad_mph <= 15
                 AND     COALESCE(ft_int_lanes_bike_straight,0) = 0;
                 UPDATE  %s
                 SET     ft_int_stress = 4
@@ -253,19 +253,19 @@ BEGIN
                 SET     tf_int_stress = 2
                 WHERE   COALESCE(tf_int_lanes_bike_wd_ft,0) >= 4
                 AND     tf_int_lanes_rt_len_ft <= 150
-                AND     tf_int_lanes_rt_radius_speed_mph <= 15
+                AND     tf_int_lanes_rt_rad_mph <= 15
                 AND     tf_int_lanes_bike_straight = 1;
                 UPDATE  %s
                 SET     tf_int_stress = 3
                 WHERE   COALESCE(tf_int_lanes_bike_wd_ft,0) >= 4
                 AND     COALESCE(tf_int_lanes_rt_len_ft,0) > 0
-                AND     tf_int_lanes_rt_radius_speed_mph <= 20
+                AND     tf_int_lanes_rt_rad_mph <= 20
                 AND     tf_int_lanes_bike_straight = 1
                 AND     tf_int_stress IS NOT NULL;
                 UPDATE  %s
                 SET     tf_int_stress = 3
                 WHERE   COALESCE(tf_int_lanes_bike_wd_ft,0) >= 4
-                AND     tf_int_lanes_rt_radius_speed_mph <= 15
+                AND     tf_int_lanes_rt_rad_mph <= 15
                 AND     COALESCE(tf_int_lanes_bike_straight,0) = 0;
                 UPDATE  %s
                 SET     tf_int_stress = 4
