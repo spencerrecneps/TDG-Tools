@@ -37,7 +37,7 @@ from processing.tools import dataobjects
 
 class GetCrossStreets(TDGAlgorithm):
     """This algorithm takes an input road dataset and calculates
-    the traffic stress
+    the cross streets
     """
 
     # Constants used to refer to parameters and outputs. They will be
@@ -56,7 +56,7 @@ class GetCrossStreets(TDGAlgorithm):
         """
 
         # The name that the user will see in the toolbox
-        self.name = 'Set Cross Street Data'
+        self.name = 'Set cross street data'
 
         # The branch of the toolbox under which the algorithm will appear
         #self.group = 'Algorithms for vector layers'
