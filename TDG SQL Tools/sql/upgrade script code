@@ -1,0 +1,4 @@
+ALTER EXTENSION tdg DROP FUNCTION tdg.tdgRoadGeomChangeTable();
+ALTER EXTENSION tdg DROP FUNCTION tdg.tdgRoadGeomChangeVals();
+ALTER EXTENSION tdg DROP FUNCTION tdg.tdgRoadGeomUpdate();
+ALTER EXTENSION tdg DROP FUNCTION tdg.tdgTriggerDoNothing();
