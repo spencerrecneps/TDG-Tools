@@ -180,10 +180,10 @@ class Meld(TDGAlgorithm):
 
             if tolerance == 0:
                 # get the 5 nearest neighbors
-                sourceIds = index.nearestNeighbor(midPoint,5)
+                sourceIds = index.nearestNeighbor(midPoint.asPoint(),5)
 
                 # loop through the nearest features and identify the closest match
-                minDist = float()
+                minDist = -1
                 for sourceId in sourceIds:
                     sourceGeom = QgsGeometry(sourceFeatures.get(sourceId).geometry())
 
@@ -191,7 +191,7 @@ class Meld(TDGAlgorithm):
                     firstDist = firstPoint.distance(sourceGeom)
                     lastDist = lastPoint.distance(sourceGeom)
 
-                    if minDist is None:
+                    if minDist < 0:
                         minDist = firstDist + lastDist
                         matchId = sourceFeatures[sourceId][sourceFieldName]
                     elif minDist > firstDist + lastDist:
