@@ -104,7 +104,7 @@ class Meld(TDGAlgorithm):
         self.addParameter(
             ParameterNumber(
                 self.TOLERANCE,
-                self.tr('Search tolerance'),
+                self.tr('Search tolerance (if 0 the nearest match will be used regardless of distance)'),
                 minValue=0
             )
         )
@@ -171,50 +171,71 @@ class Meld(TDGAlgorithm):
             targetGeom = QgsGeometry(targetFeat.geometry())
             if targetGeom is None:
                 continue
-            targetBox = targetGeom.buffer(tolerance,5).boundingBox()
-            avgDist = None
-            targetLength = targetGeom.length()
 
             # get first, last, and mid points of target feature
+            targetLength = targetGeom.length()
             firstPoint = targetGeom.interpolate(0)
             midPoint = targetGeom.interpolate(targetLength*0.5)
             lastPoint = targetGeom.interpolate(targetLength)
 
-            # get list of source ids from the spatial index
-            sourceIds = index.intersects(targetBox)
+            if tolerance == 0:
+                # get the 5 nearest neighbors
+                sourceIds = index.nearestNeighbor(midPoint,5)
 
-            for sourceId in sourceIds:
-                sourceGeom = QgsGeometry(sourceFeatures.get(sourceId).geometry())
+                # loop through the nearest features and identify the closest match
+                minDist = float()
+                for sourceId in sourceIds:
+                    sourceGeom = QgsGeometry(sourceFeatures.get(sourceId).geometry())
 
-                # skip a feature if it's not at least 1/2 as long as target
-                if sourceGeom.length() < (targetGeom.length()*0.5):
-                    continue
+                    # get distances
+                    firstDist = firstPoint.distance(sourceGeom)
+                    lastDist = lastPoint.distance(sourceGeom)
 
-                # get distances
-                firstDist = firstPoint.distance(sourceGeom)
-                midDist = midPoint.distance(sourceGeom)
-                lastDist = lastPoint.distance(sourceGeom)
+                    if minDist is None:
+                        minDist = firstDist + lastDist
+                        matchId = sourceFeatures[sourceId][sourceFieldName]
+                    elif minDist > firstDist + lastDist:
+                        minDist = firstDist + lastDist
+                        matchId = sourceFeatures[sourceId][sourceFieldName]
+            else:
+                targetBox = targetGeom.buffer(tolerance,5).boundingBox()
+                avgDist = None
 
-                # skip a feature if it's beyond the tolerance at any point on the target
-                if (firstDist > tolerance or
-                        midDist > tolerance or
-                        lastDist > tolerance):
-                    continue
+                # get list of intersecting source ids from the spatial index
+                sourceIds = index.intersects(targetBox)
 
-                # check deviation
-                dev = sqrt((midDist - firstDist)**2 + (midDist - lastDist)**2)
-                if dev > (targetLength/2):
-                    continue
+                for sourceId in sourceIds:
+                    sourceGeom = QgsGeometry(sourceFeatures.get(sourceId).geometry())
 
-                # get the closest match
-                checkDist = sum([firstDist,midDist,lastDist])/3
+                    # skip a feature if it's not at least 1/2 as long as target
+                    if sourceGeom.length() < (targetGeom.length()*0.5):
+                        continue
 
-                if avgDist is None:
-                    avgDist = checkDist
-                    matchId = sourceFeatures[sourceId][sourceFieldName]
-                elif checkDist < avgDist:
-                    avgDist = checkDist
-                    matchId = sourceFeatures[sourceId][sourceFieldName]
+                    # get distances
+                    firstDist = firstPoint.distance(sourceGeom)
+                    midDist = midPoint.distance(sourceGeom)
+                    lastDist = lastPoint.distance(sourceGeom)
+
+                    # skip a feature if it's beyond the tolerance at any point on the target
+                    if (firstDist > tolerance or
+                            midDist > tolerance or
+                            lastDist > tolerance):
+                        continue
+
+                    # check deviation
+                    dev = sqrt((midDist - firstDist)**2 + (midDist - lastDist)**2)
+                    if dev > (targetLength/2):
+                        continue
+
+                    # get the closest match
+                    checkDist = sum([firstDist,midDist,lastDist])/3
+
+                    if avgDist is None:
+                        avgDist = checkDist
+                        matchId = sourceFeatures[sourceId][sourceFieldName]
+                    elif checkDist < avgDist:
+                        avgDist = checkDist
+                        matchId = sourceFeatures[sourceId][sourceFieldName]
 
             outFeat.setAttribute(1,matchId)
             outFeat.setGeometry(targetGeom)
