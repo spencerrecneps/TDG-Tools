@@ -103,7 +103,7 @@ class ShortestPathFromLayer(TDGAlgorithm):
             ParameterVector(
                 self.DESTINATIONS_LAYER,
                 self.tr('Destinations layer (must have vertex IDs)'),
-                [ParameterVector.VECTOR_TYPE_POINT],
+                [ParameterVector.VECTOR_TYPE_ANY],
                 optional=False
             )
         )
