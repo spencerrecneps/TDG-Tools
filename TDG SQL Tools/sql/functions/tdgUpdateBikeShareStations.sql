@@ -80,11 +80,13 @@ for system in systems:
 
             # set vars
             tableName = system.get('table_name')
+            bufferTableName = tableName + '_buffer'
             lat = system.get('lat')
             lon = system.get('lon')
             tree = system.get('tree')
             url = system.get('url')
-            srid = system.get('srid')
+            sourceSrid = system.get('source_srid')
+            localSrid = system.get('local_srid')
 
             # set var for whether the table already exists
             tableCheck = plpy.execute(u'select * from tdgTableCheck(%s)' % plpy.quote_literal(tableName))
@@ -129,11 +131,13 @@ for system in systems:
                 plpy.execute(u'delete from %s where retrieval_date = current_date' % plpy.quote_ident(tableName))
                 plpy.execute(u'drop index if exists sidx_%s_geom' % tableName)
                 plpy.execute(u'drop index if exists idx_%s_date' % tableName)
+                plpy.info('    -> Deleting old buffers from %s' % bufferTableName)
+                plpy.execute(u'truncate %s' % bufferTableName)
             else:
                 # set up the create statement with all text columns
-                plpy.info('    -> Building table')
+                plpy.info('    -> Building table %s' % tableName)
                 sql = u'create table received.%s ( \
-                    geom geometry(point,%d)' % (plpy.quote_ident(tableName), srid)
+                    geom geometry(point,%d)' % (plpy.quote_ident(tableName), localSrid)
                 sql += u',retrieval_date date'
                 for col, colType in columnTypes.iteritems():
                     sql += u',%s text' % plpy.quote_ident(col)
@@ -142,8 +146,15 @@ for system in systems:
                 # create new table
                 plpy.execute(sql)
 
+                # create the buffer table
+                plpy.info('    -> Building table %s' % bufferTableName)
+                sql = u'create table generated.%s ( \
+                    id serial primary key, \
+                    geom geometry(polygon,%d))' % (plpy.quote_ident(bufferTableName), localSrid)
+                plpy.execute(sql)
+
             # insert new values
-            plpy.info(u'    -> Inserting data')
+            plpy.info(u'    -> Inserting data into %s' % tableName)
             values = u''
             cols = columnTypes.keys()
             cols.sort()
@@ -182,9 +193,10 @@ for system in systems:
                 plpy.execute(sql)
 
             # set the geom
-            sql = u'update %s set geom = st_setSRID(st_makepoint(' % plpy.quote_ident(tableName)
+            sql = u'update %s set geom = st_transform(st_setSRID(st_makepoint(' % plpy.quote_ident(tableName)
             sql += u'%s,%s)' % (plpy.quote_ident(lon),plpy.quote_ident(lat))
-            sql += u',%d) ' % srid
+            sql += u',%d)' % sourceSrid
+            sql += u',%d) ' % localSrid
             sql += u'where geom is null'
             plpy.execute(sql)
 
@@ -196,6 +208,14 @@ for system in systems:
             # set indexes
             plpy.execute(u'create index sidx_%s_geom on %s using gist (geom)' % (tableName,plpy.quote_ident(tableName)))
             plpy.execute(u'create index idx_%s_date on %s (retrieval_date)' % (tableName,plpy.quote_ident(tableName)))
+
+            # create buffer
+            plpy.info('Creating buffer in %s' % bufferTableName)
+            sql = u'insert into generated.%s (geom) ' % bufferTableName
+            sql += u'select st_buffer(st_union(st_buffer(geom,2640)),-1320) '
+            sql += u'from received.%s ' % tableName
+            sql += u'where retriveal_date = current_date '
+            plpy.execute(sql)
 
             # create view of latest data (if table doesn't already exist)
             if not exists:
