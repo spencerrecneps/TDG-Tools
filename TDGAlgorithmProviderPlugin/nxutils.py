@@ -73,3 +73,11 @@ class NXUtils:
 
     def getNetwork(self):
         return self.DG
+
+    def getStressNetwork(self,stress):
+        SG = nx.DiGraph()
+        SG = nx.DiGraph( [ (u,v,d) for u,v,d in self.DG.edges(data=True) if d['stress'] <= stress ] )
+        for v in SG.nodes:
+            SG.node[v]['weight'] = self.DG.node[v].get('weight')
+            SG.node[v]['int_id'] = self.DG.node[v].get('int_id')
+        return SG

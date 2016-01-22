@@ -204,10 +204,11 @@ class ShortestPathFromLayer(TDGAlgorithm):
             routeFields.append(QgsField('cmtve_cost', QVariant.Int))
             routeWriter = self.getOutputFromName(self.ROUTES_LAYER).getVectorWriter(
                 routeFields, QGis.WKBLineString, roadsLayer.crs())
+
+        sumFields = QgsFields()
+        sumFields.append(QgsField('road_id', QVariant.Int))
+        sumFields.append(QgsField('use_count', QVariant.Int))
         if keepSums:
-            sumFields = QgsFields()
-            sumFields.append(QgsField('road_id', QVariant.Int))
-            sumFields.append(QgsField('use_count', QVariant.Int))
             sumWriter = self.getOutputFromName(self.SUMS_LAYER).getVectorWriter(
                 sumFields, QGis.WKBLineString, roadsLayer.crs())
         progress.setPercentage(2)
@@ -221,12 +222,11 @@ class ShortestPathFromLayer(TDGAlgorithm):
         progress.setInfo('Building network')
         nu = NXUtils(self.vertsLayer,self.linksLayer)
         nu.buildNetwork()
-        DG = nu.getNetwork()
-        progress.setPercentage(10)
-
-        # read input stress
         if not stress:
-            stress = 99
+            DG = nu.getNetwork()
+        else:
+            DG = nu.getStressNetwork(stress)
+        progress.setPercentage(10)
 
         # Get vertex IDs from input layer
         progress.setInfo('Getting vertex IDs')
@@ -282,71 +282,75 @@ class ShortestPathFromLayer(TDGAlgorithm):
                                                             target=toVert,
                                                             weight='weight')
                             for i, v1 in enumerate(shortestPath):
-                                if i == 0:
-                                    pass  #leave out because this is the start vertex
-                                elif i == len(shortestPath) - 1:
-                                    pass  #Leave out because this is the last vertex
-                                else:
-                                    rowCount += 1
-                                    v2 = shortestPath[i+1]
-                                    roadId = DG.edge[v1][v2]['road_id']
-                                    if not roadId:
-                                        continue       #skip if this isn't a road link
-                                    seq += 1
-                                    roads[roadId]['count'] += 1
-                                    v3 = None
-                                    if i < len(shortestPath) - 2:
-                                        v3 = shortestPath[i+2]
+                                # if i == 0:
+                                #     continue    #leave out because this is the start vertex
+                                if i == len(shortestPath) - 1:
+                                    continue    #Leave out because this is the last vertex
 
-                                    # set costs
-                                    linkCost = DG.edge[v1][v2]['weight']
-                                    intCost = 0
-                                    if v3 and not DG.edge[v2][v3]['road_id']:
-                                        intCost = DG.edge[v2][v3]['weight']
-                                    cost += linkCost
-                                    cost += intCost
+                                rowCount += 1
+                                v2 = shortestPath[i+1]
+                                roadId = DG.edge[v1][v2]['road_id']
+                                if not roadId:
+                                    continue       #skip if this isn't a road link
+                                seq += 1
+                                roads[roadId]['count'] += 1
+                                v3 = None
+                                if i < len(shortestPath) - 2:
+                                    v3 = shortestPath[i+2]
 
-                                    # create the new features
-                                    if roadId in roads and roads.get(roadId).get('geom'):
-                                        geom = roads.get(roadId).get('geom')
-                                        if keepRaw:
-                                            rawFeat = QgsFeature(rawFields)
-                                            rawFeat.setAttribute(0,pairCount) #path_id
-                                            rawFeat.setAttribute(1,seq) #sequence
-                                            rawFeat.setAttribute(2,fromVert) #from_vert
-                                            rawFeat.setAttribute(3,toVert) #to_vert
-                                            rawFeat.setAttribute(4,DG.node[v2]['int_id']) #int_id
-                                            rawFeat.setAttribute(5,intCost) #int_cost
-                                            rawFeat.setAttribute(6,roadId) #road_id
-                                            rawFeat.setAttribute(7,linkCost) #road_cost
-                                            rawFeat.setAttribute(8,cost) #cmtve_cost
-                                            rawFeat.setGeometry(geom)
-                                            rawWriter.addFeature(rawFeat)
-                                            del rawFeat
-                                        if keepRoutes:
-                                            routeFeat.setAttribute(3,cost) #cmtve_cost
-                                            if not routeFeat.constGeometry():
-                                                routeFeat.setGeometry(geom)
-                                            else:
-                                                routeFeat.setGeometry(
-                                                    geom.combine(routeFeat.constGeometry())
-                                                )
-                                            routeWriter.addFeature(routeFeat)
-                                        if keepSums:
-                                            sumFeat = roads.get(roadId).get('feat')
-                                            useCount = roads.get(roadId).get('count')
-                                            sumFeat.setAttribute(1,useCount) #use_count
+                                # set costs
+                                linkCost = DG.edge[v1][v2]['weight']
+                                intCost = 0
+                                if v3 and not DG.edge[v2][v3]['road_id']:
+                                    intCost = DG.edge[v2][v3]['weight']
+                                cost += linkCost
+                                cost += intCost
+
+                                # create the new features
+                                if roadId in roads and roads.get(roadId).get('geom'):
+                                    geom = roads.get(roadId).get('geom')
+                                    if keepRaw:
+                                        rawFeat = QgsFeature(rawFields)
+                                        rawFeat.setAttribute(0,pairCount) #path_id
+                                        rawFeat.setAttribute(1,seq) #sequence
+                                        rawFeat.setAttribute(2,fromVert) #from_vert
+                                        rawFeat.setAttribute(3,toVert) #to_vert
+                                        rawFeat.setAttribute(4,DG.node[v2]['int_id']) #int_id
+                                        rawFeat.setAttribute(5,intCost) #int_cost
+                                        rawFeat.setAttribute(6,roadId) #road_id
+                                        rawFeat.setAttribute(7,linkCost) #road_cost
+                                        rawFeat.setAttribute(8,cost) #cmtve_cost
+                                        rawFeat.setGeometry(geom)
+                                        rawWriter.addFeature(rawFeat)
+                                        del rawFeat
+                                    if keepRoutes:
+                                        routeFeat.setAttribute(3,cost) #cmtve_cost
+                                        if not routeFeat.constGeometry():
+                                            routeFeat.setGeometry(geom)
+                                        else:
+                                            routeFeat.setGeometry(
+                                                geom.combine(routeFeat.constGeometry())
+                                            )
+                                        routeWriter.addFeature(routeFeat)
+                                    if keepSums:
+                                        sumFeat = roads.get(roadId).get('feat')
+                                        useCount = roads.get(roadId).get('count')
+                                        sumFeat.setAttribute(1,useCount) #use_count
 
                         del routeFeat
                         progress.setPercentage(10 + 90*pairCount/vertPairCount)
 
             for roadId, r in roads.iteritems():
                 if r.get('count') > 0:
-                    sumWriter.addFeature(r.get('feat'))
+                    if keepSums:
+                        sumWriter.addFeature(r.get('feat'))
 
         except Exception, e:
             raise GeoAlgorithmExecutionException('Uncaught error: %s' % e)
 
-        del rawWriter
-        del routeWriter
-        del sumWriter
+        if keepRaw:
+            del rawWriter
+        if keepRoutes:
+            del routeWriter
+        if keepSums:
+            del sumWriter
