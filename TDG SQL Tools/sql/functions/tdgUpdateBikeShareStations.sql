@@ -150,7 +150,7 @@ for system in systems:
                 plpy.info('    -> Building table %s' % bufferTableName)
                 sql = u'create table generated.%s ( \
                     id serial primary key, \
-                    geom geometry(polygon,%d))' % (plpy.quote_ident(bufferTableName), localSrid)
+                    geom geometry(multipolygon,%d))' % (plpy.quote_ident(bufferTableName), localSrid)
                 plpy.execute(sql)
 
             # insert new values
@@ -212,9 +212,9 @@ for system in systems:
             # create buffer
             plpy.info('Creating buffer in %s' % bufferTableName)
             sql = u'insert into generated.%s (geom) ' % bufferTableName
-            sql += u'select st_buffer(st_union(st_buffer(geom,2640)),-1320) '
+            sql += u'select st_multi(st_buffer(st_union(st_multi(st_buffer(geom,2640))),-1320)) '
             sql += u'from received.%s ' % tableName
-            sql += u'where retriveal_date = current_date '
+            sql += u'where retrieval_date = current_date '
             plpy.execute(sql)
 
             # create view of latest data (if table doesn't already exist)
