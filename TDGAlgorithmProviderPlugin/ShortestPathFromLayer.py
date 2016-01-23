@@ -61,6 +61,7 @@ class ShortestPathFromLayer(TDGAlgorithm):
     DESTINATIONS_LAYER = 'DESTINATIONS_LAYER'
     VERT_ID_FIELD = 'VERT_ID_FIELD'
     STRESS = 'STRESS'
+    MAX_COST = 'MAX_COST'
     KEEP_RAW = 'KEEP_RAW'
     RAW_LAYER = 'RAW_LAYER'
     KEEP_ROUTES = 'KEEP_ROUTES'
@@ -129,6 +130,14 @@ class ShortestPathFromLayer(TDGAlgorithm):
             )
         )
 
+        # Max cost
+        self.addParameter(
+            ParameterNumber(
+                self.MAX_COST,
+                self.tr('Maximum allowable cost (leave at 0 to ignore)')
+            )
+        )
+
         # Keep raw layer?
         self.addParameter(
             ParameterBoolean(
@@ -178,6 +187,7 @@ class ShortestPathFromLayer(TDGAlgorithm):
             self.getParameterValue(self.DESTINATIONS_LAYER))
         vertIdField = self.getParameterValue(self.VERT_ID_FIELD)
         stress = self.getParameterValue(self.STRESS)
+        maxCost = self.getParameterValue(self.MAX_COST)
         keepRaw = self.getParameterValue(self.KEEP_RAW)
         keepRoutes = self.getParameterValue(self.KEEP_ROUTES)
         keepSums = self.getParameterValue(self.KEEP_SUMS)
@@ -305,6 +315,10 @@ class ShortestPathFromLayer(TDGAlgorithm):
                                         intCost = DG.edge[v2][v3]['weight']
                                     cost += linkCost
                                     cost += intCost
+
+                                    # check cost against max
+                                    if maxCost > 0 and cost > maxCost:
+                                        continue
 
                                     # create the new features
                                     if roadId in roads and roads.get(roadId).get('geom'):
