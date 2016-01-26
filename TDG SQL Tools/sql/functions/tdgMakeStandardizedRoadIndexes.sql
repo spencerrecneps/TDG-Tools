@@ -5,7 +5,7 @@ DECLARE
     table_name TEXT;
 
 BEGIN
-    EXECUTE 'SELECT table_name FROM tdgTableDetails($1);'
+    EXECUTE 'SELECT table_name FROM tdg.tdgTableDetails($1);'
     USING   road_table_::TEXT
     INTO    table_name;
 

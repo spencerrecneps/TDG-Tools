@@ -6,7 +6,7 @@ DECLARE
 
 BEGIN
     --get base table name
-    EXECUTE 'SELECT table_name FROM tdgTableDetails($1);'
+    EXECUTE 'SELECT table_name FROM tdg.tdgTableDetails($1);'
     USING   int_table_::TEXT
     INTO    table_name;
 
