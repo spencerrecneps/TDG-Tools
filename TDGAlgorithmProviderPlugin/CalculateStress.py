@@ -87,6 +87,9 @@ class CalculateStress(TDGAlgorithm):
     def processAlgorithm(self, progress):
         # Retrieve the values of the parameters entered by the user
         inLayer = dataobjects.getObjectFromUri(self.getParameterValue(self.ROADS_LAYER))
+        calcSegment = self.getParameterValue(self.SEGMENT)
+        calcApproach = self.getParameterValue(self.APPROACH)
+        calcCross = self.getParameterValue(self.CROSS)
 
         # establish db connection
         progress.setInfo('Getting DB connection')
@@ -100,15 +103,15 @@ class CalculateStress(TDGAlgorithm):
 
         sql = u'select tdgCalculateStress('
         sql = sql + "'" + self.roadsTable + "'"
-        if self.SEGMENT:
+        if calcSegment:
             sql = sql + ",'t'"
         else:
             sql = sql + ",'f'"
-        if self.APPROACH:
+        if calcApproach:
             sql = sql + ",'t'"
         else:
             sql = sql + ",'f'"
-        if self.CROSS:
+        if calcCross:
             sql = sql + ",'t'"
         else:
             sql = sql + ",'f'"
