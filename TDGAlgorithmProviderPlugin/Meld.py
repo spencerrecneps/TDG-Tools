@@ -38,11 +38,12 @@ from processing.core.parameters import ParameterVector
 from processing.core.parameters import ParameterBoolean
 from processing.core.parameters import ParameterNumber
 from processing.core.parameters import ParameterTableField
+from processing.core.parameters import ParameterSelection
 from processing.core.outputs import OutputVector
 from processing.tools import dataobjects, vector
 
 class Meld(TDGAlgorithm):
-    """This algorithm takes an target line dataset and a
+    """This algorithm takes a target line dataset and a
     source line dataset. It identifies the most likely candidate
     for a match based on the spatial mismatch between the two at
     various points along the source line.
@@ -57,6 +58,7 @@ class Meld(TDGAlgorithm):
     SOURCE_LAYER = 'SOURCE_LAYER'
     SOURCE_IDS = 'SOURCE_IDS'
     TOLERANCE = 'TOLERANCE'
+    METHOD = 'METHOD'
     OUT_LAYER = 'OUT_LAYER'
     KEEP_NULLS = 'KEEP_NULLS'
 
@@ -104,10 +106,15 @@ class Meld(TDGAlgorithm):
         self.addParameter(
             ParameterNumber(
                 self.TOLERANCE,
-                self.tr('Search tolerance (if 0 the nearest match will be used regardless of distance)'),
+                self.tr('Search tolerance'),
                 minValue=0
             )
         )
+
+        # Method
+        self.METHODS = ['Endpoints','Midpoint']#,'Thirds']
+        self.addParameter(ParameterSelection(self.METHOD,
+            self.tr('Search method'), self.METHODS))
 
         # Output layer
         self.addOutput(
@@ -130,6 +137,7 @@ class Meld(TDGAlgorithm):
         sourceLayer = dataobjects.getObjectFromUri(self.getParameterValue(self.SOURCE_LAYER))
         sourceFieldName = self.getParameterValue(self.SOURCE_IDS)
         tolerance = self.getParameterValue(self.TOLERANCE)
+        method = self.METHODS[self.getParameterValue(self.METHOD)]
         keepNulls = self.getParameterValue(self.KEEP_NULLS)
 
         # get input field types and set output fields
@@ -178,14 +186,24 @@ class Meld(TDGAlgorithm):
             midPoint = targetGeom.interpolate(targetLength*0.5)
             lastPoint = targetGeom.interpolate(targetLength)
 
-            if tolerance == 0:
+            # get source features within the tolerance
+            targetBox = targetGeom.buffer(tolerance,5).boundingBox()
+            sourceIds = index.intersects(targetBox)
+
+            # test for nearness
+            if method == 'Midpoint':
                 # get the 5 nearest neighbors
-                sourceIds = index.nearestNeighbor(midPoint.asPoint(),5)
+                midSourceIds = index.nearestNeighbor(midPoint.asPoint(),5)
 
                 # loop through the nearest features and identify the closest match
                 minDist = -1
-                for sourceId in sourceIds:
+                for sourceId in midSourceIds:
+                    if not sourceId in sourceIds:
+                        continue
                     sourceGeom = QgsGeometry(sourceFeatures.get(sourceId).geometry())
+
+                    if midPoint.distance(sourceGeom) > tolerance:
+                        continue
 
                     # get distances
                     firstDist = firstPoint.distance(sourceGeom)
@@ -197,12 +215,38 @@ class Meld(TDGAlgorithm):
                     elif minDist > firstDist + lastDist:
                         minDist = firstDist + lastDist
                         matchId = sourceFeatures[sourceId][sourceFieldName]
-            else:
-                targetBox = targetGeom.buffer(tolerance,5).boundingBox()
-                avgDist = None
+            elif method == 'Thirds':
+                thirdPoint = targetGeom.interpolate(targetLength*0.33)
+                twoThirdsPoint = targetGeom.interpolate(targetLength*0.67)
 
-                # get list of intersecting source ids from the spatial index
-                sourceIds = index.intersects(targetBox)
+                # get the 5 nearest neighbors
+                thirdSourceIds = index.nearestNeighbor(thirdPoint.asPoint(),5)
+                twoThirdsSourceIds = index.nearestNeighbor(twoThirdsPoint.asPoint(),5)
+
+                # find common ids
+
+                # loop through the nearest features and identify the closest match
+                minDist = -1
+                for sourceId in midSourceIds:
+                    if not sourceId in sourceIds:
+                        continue
+                    sourceGeom = QgsGeometry(sourceFeatures.get(sourceId).geometry())
+
+                    if midPoint.distance(sourceGeom) > tolerance:
+                        continue
+
+                    # get distances
+                    firstDist = firstPoint.distance(sourceGeom)
+                    lastDist = lastPoint.distance(sourceGeom)
+
+                    if minDist < 0:
+                        minDist = firstDist + lastDist
+                        matchId = sourceFeatures[sourceId][sourceFieldName]
+                    elif minDist > firstDist + lastDist:
+                        minDist = firstDist + lastDist
+                        matchId = sourceFeatures[sourceId][sourceFieldName]
+            elif method == 'Endpoints':
+                avgDist = None
 
                 for sourceId in sourceIds:
                     sourceGeom = QgsGeometry(sourceFeatures.get(sourceId).geometry())
