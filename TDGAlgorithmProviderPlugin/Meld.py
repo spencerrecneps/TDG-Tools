@@ -58,6 +58,7 @@ class Meld(TDGAlgorithm):
     SOURCE_LAYER = 'SOURCE_LAYER'
     SOURCE_IDS = 'SOURCE_IDS'
     TOLERANCE = 'TOLERANCE'
+    MAX_SKEW = 'MAX_SKEW'
     METHOD = 'METHOD'
     OUT_LAYER = 'OUT_LAYER'
     KEEP_NULLS = 'KEEP_NULLS'
@@ -111,6 +112,16 @@ class Meld(TDGAlgorithm):
             )
         )
 
+        # Max skew
+        self.addParameter(
+            ParameterNumber(
+                self.MAX_SKEW,
+                self.tr('Maximum skew (degrees, not used for midpoint method)'),
+                minValue=0,
+                default=30
+            )
+        )
+
         # Method
         self.METHODS = ['Endpoints','Midpoint']#,'Thirds']
         self.addParameter(ParameterSelection(self.METHOD,
@@ -137,6 +148,7 @@ class Meld(TDGAlgorithm):
         sourceLayer = dataobjects.getObjectFromUri(self.getParameterValue(self.SOURCE_LAYER))
         sourceFieldName = self.getParameterValue(self.SOURCE_IDS)
         tolerance = self.getParameterValue(self.TOLERANCE)
+        maxSkew = self.getParameterValue(self.MAX_SKEW)
         method = self.METHODS[self.getParameterValue(self.METHOD)]
         keepNulls = self.getParameterValue(self.KEEP_NULLS)
 
@@ -248,12 +260,20 @@ class Meld(TDGAlgorithm):
             elif method == 'Endpoints':
                 avgDist = None
 
+                thisAngle = radians(firstPoint().asPoint().azimuth(lastPoint().asPoint()))
+
                 for sourceId in sourceIds:
                     sourceGeom = QgsGeometry(sourceFeatures.get(sourceId).geometry())
 
                     # skip a feature if it's not at least 1/2 as long as target
                     if sourceGeom.length() < (targetGeom.length()*0.5):
                         continue
+
+                    # skip a feature if the difference in angles is too large
+                    fp = sourceGeom.interpolate(0).asPoint()
+                    lp = sourceGeom.interpolate(1).asPoint()
+                    sourceAngle = radians(fp.azimuth(lp))
+                    '''Compare angles'''
 
                     # get distances
                     firstDist = firstPoint.distance(sourceGeom)
