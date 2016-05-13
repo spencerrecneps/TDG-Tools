@@ -234,7 +234,10 @@ for system in systems:
             plpy.execute(sql)
 
         except Exception, e:
-            plpy.execute(u"update %s set retrieval_status='fail', retrieval_time=current_timestamp;" % plpy.quote_ident(systemTable))
+            sql = u"update %s set retrieval_status='fail' " % plpy.quote_ident(systemTable)
+            sql += u', retrieval_time=current_timestamp '
+            sql += u'where system_name = %s ' % plpy.quote_literal(system.get('system_name'))
+            plpy.execute(sql)
             plpy.info(u'Error on table %s: %s' % (tableName, e))
 
 
