@@ -131,11 +131,13 @@ BEGIN
             direction,
             source_vert,
             target_vert,
+            link_stress,
             geom)
         SELECT  road.road_id,
                 $1,
                 vertsf.vert_id,
                 vertst.vert_id,
+                road.ft_seg_stress,
                 ST_Makeline(vertsf.geom,vertst.geom)
         FROM    '||road_table_||' road,
                 '||vert_table||' vertsf,
@@ -154,11 +156,13 @@ BEGIN
             direction,
             source_vert,
             target_vert,
+            link_stress,
             geom)
         SELECT  road.road_id,
                 $1,
                 vertst.vert_id,
                 vertsf.vert_id,
+                road.tf_seg_stress,
                 ST_Makeline(vertst.geom,vertsf.geom)
         FROM    '||road_table_||' road,
                 '||vert_table||' vertsf,
