@@ -50,7 +50,7 @@ class NXUtils:
                                 'link_cost',
                                 'link_id',
                                 'link_stress',
-                                'road_id')
+                                'int_id')
         edgeCount = len(edges['link_id'])
         for i in range(edgeCount):
             self.DG.add_edge(int(edges['source_vert'][i]),
@@ -58,13 +58,14 @@ class NXUtils:
                         weight=max(edges['link_cost'][i],0),
                         link_id=edges['link_id'][i],
                         stress=min(edges['link_stress'][i],99),
-                        road_id=edges['road_id'][i])
+                        road_id=edges['int_id'][i])
 
         # vertices
         verts = vector.values(self.vertsLayer,
                                 'vert_id',
                                 'vert_cost',
-                                'int_id')
+                                'vert_stress',
+                                'road_id')
         vertCount = len(verts['vert_id'])
         for i in range(vertCount):
             vid = verts['vert_id'][i]
@@ -75,9 +76,16 @@ class NXUtils:
         return self.DG
 
     def getStressNetwork(self,stress):
-        SG = nx.DiGraph()
+        '''SG = nx.DiGraph()
         SG = nx.DiGraph( [ (u,v,d) for u,v,d in self.DG.edges(data=True) if d['stress'] <= stress ] )
         for v in SG.nodes():
             SG.node[v]['weight'] = self.DG.node[v].get('weight')
             SG.node[v]['int_id'] = self.DG.node[v].get('int_id')
+        return SG'''
+
+        nodeList = []
+        for v in self.DG.nodes():
+            if self.DG.node[v].get('stress') <= stress:
+                nodeList.append(v)
+        SG = self.DG.subgraph(nodeList)
         return SG

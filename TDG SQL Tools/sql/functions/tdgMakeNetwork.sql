@@ -62,9 +62,9 @@ BEGIN
         EXECUTE '
             CREATE TABLE '||vert_table||' (
                 vert_id serial PRIMARY KEY,
-                int_id INT,
                 road_id INT,
                 vert_cost INT,
+                vert_stress INT,
                 geom geometry(point,'||srid::TEXT||'));';
 
         RAISE NOTICE 'creating turn restrictions table';
@@ -78,12 +78,9 @@ BEGIN
         EXECUTE '
             CREATE TABLE '||link_table||' (
                 link_id SERIAL PRIMARY KEY,
-                road_id INT,
+                int_id INT,
                 source_vert INT,
                 target_vert INT,
-                int_id INT,
-                direction VARCHAR(2),
-                movement TEXT,
                 link_cost INT,
                 link_stress INT,
                 geom geometry(linestring,'||srid::TEXT||'));';
@@ -92,30 +89,16 @@ BEGIN
 
     -- create vertices
     EXECUTE '
-        INSERT INTO '||vert_table||' (int_id,road_id,geom)
-        SELECT  ints.int_id,
-                road.road_id,
-                (ST_Dump(ST_Intersection(ST_ExteriorRing(ST_Buffer(ints.geom,2)),road.geom))).geom
-        FROM    '||int_table||' ints
-        JOIN    '||road_table_||' road
-                ON ints.int_id IN (road.intersection_from,road.intersection_to)
-        WHERE   ints.legs > 2;';
-    EXECUTE '
-        INSERT INTO '||vert_table||' (int_id,geom)
-        SELECT DISTINCT
-            ints.int_id,
-            ints.geom
-        FROM    '||int_table||' ints
-        JOIN    '||road_table_||' road
-                ON ints.int_id IN (road.intersection_from,road.intersection_to)
-        WHERE   ints.legs <= 2;';
+        INSERT INTO '||vert_table||' (road_id,geom)
+        SELECT  road.road_id,
+                ST_LineInterpolatePoint(road.geom,0.5)
+        FROM    '||road_table_||' road;';
 
     --vertex indices
     RAISE NOTICE 'Creating vertex indices';
     EXECUTE '
         CREATE INDEX sidx_'||table_name||'_vert_geom ON '||vert_table||'
             USING gist (geom);
-        CREATE INDEX idx_'||table_name||'_vert_intid ON '||vert_table||'(int_id);
         CREATE INDEX idx_'||table_name||'_vert_roadid ON '||vert_table||'(road_id);';
 
 
@@ -124,94 +107,200 @@ BEGIN
     ---------------
     -- add links --
     ---------------
-    --ft self link
+    -- two-way to two-way
     EXECUTE '
-        INSERT INTO '||link_table||' (
-            road_id,
-            direction,
-            source_vert,
-            target_vert,
-            link_stress,
-            geom)
-        SELECT  road.road_id,
-                $1,
-                vertsf.vert_id,
-                vertst.vert_id,
-                road.ft_seg_stress,
-                ST_Makeline(vertsf.geom,vertst.geom)
-        FROM    '||road_table_||' road,
-                '||vert_table||' vertsf,
-                '||vert_table||' vertst
-        WHERE   COALESCE(road.one_way,$1) = $1
-        AND     COALESCE(vertsf.road_id,road.road_id) = road.road_id
-        AND     vertsf.int_id = road.intersection_from
-        AND     COALESCE(vertst.road_id,road.road_id) = road.road_id
-        AND     vertst.int_id = road.intersection_to;'
+        INSERT INTO '||link_table||' (int_id, source_vert, target_vert, geom)
+        SELECT  ints.int_id,
+                vert1.vert_id,
+                vert2.vert_id,
+                ST_Makeline(vert1.geom,vert2.geom)
+        FROM    '||int_table||' ints,
+                '||vert_table||' vert1,
+                '||road_table_||' roads1,
+                '||vert_table||' vert2,
+                '||road_table_||' roads2
+        WHERE   vert1.road_id = roads1.road_id
+        AND     vert2.road_id = roads2.road_id
+        AND     ints.int_id IN (roads1.intersection_from, roads1.intersection_to)
+        AND     ints.int_id IN (roads2.intersection_from, roads2.intersection_to)
+        AND     roads1.one_way IS NULL
+        AND     roads2.one_way IS NULL
+        AND     roads1.road_id != roads2.road_id';
+
+    -- two-way to from-to
+    EXECUTE '
+        INSERT INTO '||link_table||' (int_id, source_vert, target_vert, geom)
+        SELECT  ints.int_id,
+                vert1.vert_id,
+                vert2.vert_id,
+                ST_Makeline(vert1.geom,vert2.geom)
+        FROM    '||int_table||' ints,
+                '||vert_table||' vert1,
+                '||road_table_||' roads1,
+                '||vert_table||' vert2,
+                '||road_table_||' roads2
+        WHERE   vert1.road_id = roads1.road_id
+        AND     vert2.road_id = roads2.road_id
+        AND     ints.int_id IN (roads1.intersection_from, roads1.intersection_to)
+        AND     ints.int_id = roads2.intersection_from
+        AND     roads1.one_way IS NULL
+        AND     roads2.one_way = $1
+        AND     roads1.road_id != roads2.road_id'
     USING   'ft';
 
-    --tf self link
+    -- two-way to to-from
     EXECUTE '
-        INSERT INTO '||link_table||' (
-            road_id,
-            direction,
-            source_vert,
-            target_vert,
-            link_stress,
-            geom)
-        SELECT  road.road_id,
-                $1,
-                vertst.vert_id,
-                vertsf.vert_id,
-                road.tf_seg_stress,
-                ST_Makeline(vertst.geom,vertsf.geom)
-        FROM    '||road_table_||' road,
-                '||vert_table||' vertsf,
-                '||vert_table||' vertst
-        WHERE   COALESCE(road.one_way,$1) = $1
-        AND     COALESCE(vertsf.road_id,road.road_id) = road.road_id
-        AND     vertsf.int_id = road.intersection_from
-        AND     COALESCE(vertst.road_id,road.road_id) = road.road_id
-        AND     vertst.int_id = road.intersection_to;'
+        INSERT INTO '||link_table||' (int_id, source_vert, target_vert, geom)
+        SELECT  ints.int_id,
+                vert1.vert_id,
+                vert2.vert_id,
+                ST_Makeline(vert1.geom,vert2.geom)
+        FROM    '||int_table||' ints,
+                '||vert_table||' vert1,
+                '||road_table_||' roads1,
+                '||vert_table||' vert2,
+                '||road_table_||' roads2
+        WHERE   vert1.road_id = roads1.road_id
+        AND     vert2.road_id = roads2.road_id
+        AND     ints.int_id IN (roads1.intersection_from, roads1.intersection_to)
+        AND     ints.int_id = roads2.intersection_to
+        AND     roads1.one_way IS NULL
+        AND     roads2.one_way = $1
+        AND     roads1.road_id != roads2.road_id'
     USING   'tf';
 
-    -- connector links
+    -- from-to to two-way
     EXECUTE '
-        INSERT INTO '||link_table||' (
-            geom,
-            direction,
-            int_id,
-            source_vert,
-            target_vert)
-        SELECT  ST_Makeline(vert1.geom,vert2.geom),
-                NULL,
-                vert1.int_id,
+        INSERT INTO '||link_table||' (int_id, source_vert, target_vert, geom)
+        SELECT  ints.int_id,
                 vert1.vert_id,
-                vert2.vert_id
-        FROM    '||vert_table||' vert1
-        JOIN    '||vert_table||' vert2
-                ON  vert1.vert_id != vert2.vert_id
-                AND vert1.road_id != vert2.road_id
-                AND vert1.int_id = vert2.int_id
-        WHERE   vert1.road_id IS NOT NULL
-        AND     vert2.road_id IS NOT NULL;';
+                vert2.vert_id,
+                ST_Makeline(vert1.geom,vert2.geom)
+        FROM    '||int_table||' ints,
+                '||vert_table||' vert1,
+                '||road_table_||' roads1,
+                '||vert_table||' vert2,
+                '||road_table_||' roads2
+        WHERE   vert1.road_id = roads1.road_id
+        AND     vert2.road_id = roads2.road_id
+        AND     ints.int_id = roads1.intersection_to
+        AND     ints.int_id IN (roads2.intersection_from, roads2.intersection_to)
+        AND     roads1.one_way = $1
+        AND     roads2.one_way IS NULL
+        AND     roads1.road_id != roads2.road_id'
+    USING   'ft';
 
+    -- from-to to from-to
+    EXECUTE '
+        INSERT INTO '||link_table||' (int_id, source_vert, target_vert, geom)
+        SELECT  ints.int_id,
+                vert1.vert_id,
+                vert2.vert_id,
+                ST_Makeline(vert1.geom,vert2.geom)
+        FROM    '||int_table||' ints,
+                '||vert_table||' vert1,
+                '||road_table_||' roads1,
+                '||vert_table||' vert2,
+                '||road_table_||' roads2
+        WHERE   vert1.road_id = roads1.road_id
+        AND     vert2.road_id = roads2.road_id
+        AND     ints.int_id = roads1.intersection_to
+        AND     ints.int_id = roads2.intersection_from
+        AND     roads1.one_way = $1
+        AND     roads2.one_way = $1
+        AND     roads1.road_id != roads2.road_id'
+    USING   'ft';
 
-    --set turn information intersection by intersections
-    -- BEGIN
-    --     EXECUTE format('
-    --         SELECT tdgSetTurnInfo(%L,%L,%L,%L);
-    --         ',  link_table,
-    --             int_table,
-    --             vert_table);
-    -- END;
+    -- from-to to to-from
+    EXECUTE '
+        INSERT INTO '||link_table||' (int_id, source_vert, target_vert, geom)
+        SELECT  ints.int_id,
+                vert1.vert_id,
+                vert2.vert_id,
+                ST_Makeline(vert1.geom,vert2.geom)
+        FROM    '||int_table||' ints,
+                '||vert_table||' vert1,
+                '||road_table_||' roads1,
+                '||vert_table||' vert2,
+                '||road_table_||' roads2
+        WHERE   vert1.road_id = roads1.road_id
+        AND     vert2.road_id = roads2.road_id
+        AND     ints.int_id = roads1.intersection_to
+        AND     ints.int_id = roads2.intersection_to
+        AND     roads1.one_way = $1
+        AND     roads2.one_way = $2
+        AND     roads1.road_id != roads2.road_id'
+    USING   'ft', 'tf';
 
+    -- to-from to two-way
+    EXECUTE '
+        INSERT INTO '||link_table||' (int_id, source_vert, target_vert, geom)
+        SELECT  ints.int_id,
+                vert1.vert_id,
+                vert2.vert_id,
+                ST_Makeline(vert1.geom,vert2.geom)
+        FROM    '||int_table||' ints,
+                '||vert_table||' vert1,
+                '||road_table_||' roads1,
+                '||vert_table||' vert2,
+                '||road_table_||' roads2
+        WHERE   vert1.road_id = roads1.road_id
+        AND     vert2.road_id = roads2.road_id
+        AND     ints.int_id = roads1.intersection_from
+        AND     ints.int_id IN (roads2.intersection_from, roads2.intersection_to)
+        AND     roads1.one_way = $1
+        AND     roads2.one_way IS NULL
+        AND     roads1.road_id != roads2.road_id'
+    USING   'tf';
+
+    -- to-from to to-from
+    EXECUTE '
+        INSERT INTO '||link_table||' (int_id, source_vert, target_vert, geom)
+        SELECT  ints.int_id,
+                vert1.vert_id,
+                vert2.vert_id,
+                ST_Makeline(vert1.geom,vert2.geom)
+        FROM    '||int_table||' ints,
+                '||vert_table||' vert1,
+                '||road_table_||' roads1,
+                '||vert_table||' vert2,
+                '||road_table_||' roads2
+        WHERE   vert1.road_id = roads1.road_id
+        AND     vert2.road_id = roads2.road_id
+        AND     ints.int_id = roads1.intersection_from
+        AND     ints.int_id = roads2.intersection_to
+        AND     roads1.one_way = $1
+        AND     roads2.one_way = $1
+        AND     roads1.road_id != roads2.road_id'
+    USING   'tf';
+
+    -- to-from to from-to
+    EXECUTE '
+        INSERT INTO '||link_table||' (int_id, source_vert, target_vert, geom)
+        SELECT  ints.int_id,
+                vert1.vert_id,
+                vert2.vert_id,
+                ST_Makeline(vert1.geom,vert2.geom)
+        FROM    '||int_table||' ints,
+                '||vert_table||' vert1,
+                '||road_table_||' roads1,
+                '||vert_table||' vert2,
+                '||road_table_||' roads2
+        WHERE   vert1.road_id = roads1.road_id
+        AND     vert2.road_id = roads2.road_id
+        AND     ints.int_id = roads1.intersection_from
+        AND     ints.int_id = roads2.intersection_from
+        AND     roads1.one_way = $1
+        AND     roads2.one_way = $2
+        AND     roads1.road_id != roads2.road_id'
+    USING   'tf', 'ft';
 
     --link indexes
     BEGIN
         RAISE NOTICE 'creating link indexes';
         EXECUTE '
-            CREATE INDEX idx_'||table_name||'_link_road_id ON '||link_table||' (road_id);
-            CREATE INDEX idx_'||table_name||'_link_direction ON '||link_table||' (direction);
+            CREATE INDEX idx_'||table_name||'_vert_road_id ON '||vert_table||' (road_id);
+            CREATE INDEX idx_'||table_name||'_link_int_id ON '||link_table||' (int_id);
             CREATE INDEX idx_'||table_name||'_link_src_trgt ON '||link_table||' (source_vert,target_vert);';
     END;
 

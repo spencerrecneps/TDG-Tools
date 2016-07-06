@@ -5,25 +5,25 @@ CREATE OR REPLACE FUNCTION tdg.tdgNetworkCostFromDistance(
 RETURNS BOOLEAN AS $func$
 
 DECLARE
-    link_table REGCLASS;
+    vert_table REGCLASS;
 
 BEGIN
     raise notice 'PROCESSING:';
 
-    link_table = road_table_ || '_net_link';
+    vert_table = road_table_ || '_net_vert';
 
     IF road_ids_ IS NULL THEN
         EXECUTE '
-            UPDATE  '||link_table||'
-            SET     link_cost = ST_Length(r.geom)
+            UPDATE  '||vert_table||'
+            SET     vert_cost = ST_Length(r.geom)
             FROM    '||road_table_||' r
-            WHERE   r.road_id = '||link_table||'.road_id;';
+            WHERE   r.road_id = '||vert_table||'.road_id;';
     ELSE
         EXECUTE '
-            UPDATE  '||link_table||'
-            SET     link_cost = ST_Length(r.geom)
+            UPDATE  '||vert_table||'
+            SET     vert_cost = ST_Length(r.geom)
             FROM    '||road_table_||' r
-            WHERE   r.road_id = '||link_table||'.road_id
+            WHERE   r.road_id = '||vert_table||'.road_id
             AND     r.road_id = ANY ($1);'
         USING   road_ids_;
     END IF;
