@@ -44,28 +44,33 @@ class NXUtils:
 
     def buildNetwork(self):
         # edges
-        edges = vector.values(self.linksLayer,
-                                'source_vert',
-                                'target_vert',
-                                'link_cost',
-                                'link_id',
-                                'link_stress',
-                                'int_id')
+        edges = vector.values(
+            self.linksLayer,
+            'source_vert',
+            'target_vert',
+            'link_cost',
+            'link_id',
+            'link_stress',
+            'int_id'
+        )
         edgeCount = len(edges['link_id'])
         for i in range(edgeCount):
-            self.DG.add_edge(int(edges['source_vert'][i]),
-                        int(edges['target_vert'][i]),
-                        weight=max(edges['link_cost'][i],0),
-                        link_id=edges['link_id'][i],
-                        stress=min(edges['link_stress'][i],99),
-                        road_id=edges['int_id'][i])
+            self.DG.add_edge(
+                int(edges['source_vert'][i]),
+                int(edges['target_vert'][i]),
+                weight=max(edges['link_cost'][i],0),
+                link_id=edges['link_id'][i],
+                stress=min(edges['link_stress'][i],99),
+                road_id=edges['int_id'][i]
+            )
 
         # vertices
-        verts = vector.values(self.vertsLayer,
-                                'vert_id',
-                                'vert_cost',
-                                'vert_stress',
-                                'road_id')
+        verts = vector.values(
+            self.vertsLayer,
+            'vert_id',
+            'vert_cost',
+            'road_id'
+        )
         vertCount = len(verts['vert_id'])
         for i in range(vertCount):
             vid = verts['vert_id'][i]

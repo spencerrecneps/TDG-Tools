@@ -64,7 +64,6 @@ BEGIN
                 vert_id serial PRIMARY KEY,
                 road_id INT,
                 vert_cost INT,
-                vert_stress INT,
                 geom geometry(point,'||srid::TEXT||'));';
 
         RAISE NOTICE 'creating turn restrictions table';
