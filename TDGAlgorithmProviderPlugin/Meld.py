@@ -168,7 +168,7 @@ class Meld(TDGAlgorithm):
         progress.setInfo('%i target features identified' % totalCount)
         for targetFeat in targetFeats:
             count += 1
-            progress.setPercentage(count/totalCount)
+            progress.setPercentage(int(100*count/totalCount))
             outFeat = QgsFeature(fields)
             targetId = targetFeat[targetFieldName]
             if targetId is None:
