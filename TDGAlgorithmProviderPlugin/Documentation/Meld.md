@@ -12,22 +12,32 @@
 **Search tolerance** - The search distance for finding matching features. (Given in
 units of the coordinate system.)
 
-**Output file** - The location to save the output layer (if blank, saves as a
-temporary layer)
+**Search method** - The matching method to be used.
 
 **Keep non-matching features** - Whether to keep target features that do not have a match in the
 source layer.
 
+**Output layer** - The location to save the output layer (if blank, saves as a
+temporary layer)
+
 ##Description
 Meld associates information from one set of lines onto a set of
-similar, but not exactly overlapping lines.
+similar, but not exactly overlapping lines. This is often called "conflation" in
+GIS.
 
-A match is determined using the following logic. For each target feature, a
-search is made for any source features within the tolerance distance. If there
-are any matches, they are then searched for their distance from
-the start, mid, and end points of each target feature. If a source feature
-is within the tolerance distance of all three points, it is considered a match.
-A tie is broken by the average distance from all three points.
+Match logic is defined in the **search method** parameter, which offers the
+following options:
+- Endpoints
+- Midpoints
+
+The _endpoints_ method matches features by comparing the endpoints of the target
+layer to the endpoints of the source layer. If both endpoints overlap within
+the tolerance distance a match is assumed.
+
+The _midpoints_ method matches features by finding the source features closest to
+the target feature within the tolerance. The endpoints of the target are then
+compared to each source. The source feature with the lowest cumulative distance
+from the target endpoints is assumed to match.
 
 As an example, imagine you received a layer representing all the bike lanes in
 a municipality, but the lines don't line up perfectly with the roads layer
