@@ -81,6 +81,9 @@ BEGIN
                 source_vert INT,
                 target_vert INT,
                 link_cost INT,
+                f_stress INT,
+                int_stress INT,
+                t_stress INT,
                 link_stress INT,
                 geom geometry(linestring,'||srid::TEXT||'));';
     END;
@@ -311,17 +314,35 @@ BEGIN
     --add stress to links
     BEGIN
         RAISE NOTICE 'Setting stress on links';
+        --f_stress
         EXECUTE '
             UPDATE '||link_table||'
-            SET     link_stress = GREATEST(src_road.ft_seg_stress,trgt_road.ft_seg_stress)
-            FROM    '||vert_table||' src_vert,
-                    '||road_table_||' src_road,
-                    '||vert_table||' trgt_vert,
-                    '||road_table_||' trgt_road
-            WHERE   '||link_table||'.source_vert = src_vert.vert_id
-            AND     src_vert.road_id = src_road.road_id
-            AND     '||link_table||'.target_vert = trgt_vert.vert_id
-            AND     trgt_vert.road_id = trgt_road.road_id';
+            SET     f_stress = CASE WHEN '||link_table||'.int_id = road.intersection_to THEN road.ft_seg_stress
+                                    ELSE road.tf_seg_stress
+                                    END
+            FROM    '||vert_table||' vert,
+                    '||road_table_||' road
+            WHERE   '||link_table||'.source_vert = vert.vert_id
+            AND     vert.road_id = road.road_id';
+
+        --int_stress
+        --need to set up intersection stress
+
+        --t_stress
+        EXECUTE '
+            UPDATE '||link_table||'
+            SET     t_stress = CASE WHEN '||link_table||'.int_id = road.intersection_to THEN road.tf_seg_stress
+                                    ELSE road.ft_seg_stress
+                                    END
+            FROM    '||vert_table||' vert,
+                    '||road_table_||' road
+            WHERE   '||link_table||'.target_vert = vert.vert_id
+            AND     vert.road_id = road.road_id';
+
+        --link_stress
+        EXECUTE '
+            UPDATE '||link_table||'
+            SET     link_stress = GREATEST(f_stress,int_stress,t_stress)';
     END;
 RETURN 't';
 END $func$ LANGUAGE plpgsql;
