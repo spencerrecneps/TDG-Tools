@@ -69,14 +69,12 @@ class NXUtils:
             self.vertsLayer,
             'vert_id',
             'vert_cost',
-            'vert_stress',
             'road_id'
         )
         vertCount = len(verts['vert_id'])
         for i in range(vertCount):
             vid = verts['vert_id'][i]
             self.DG.node[vid]['weight'] = max(verts['vert_cost'][i],0)
-            self.DG.node[vid]['stress'] = min(verts['vert_stress'][i],99)
             self.DG.node[vid]['road_id'] = verts['road_id'][i]
 
     def getNetwork(self):

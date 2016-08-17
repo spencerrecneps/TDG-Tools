@@ -80,10 +80,12 @@ BEGIN
                 int_id INT,
                 source_vert INT,
                 target_vert INT,
+                source_road_id INT,
+                target_road_id INT,
                 link_cost INT,
-                f_stress INT,
+                source_stress INT,
                 int_stress INT,
-                t_stress INT,
+                target_stress INT,
                 link_stress INT,
                 geom geometry(linestring,'||srid::TEXT||'));';
     END;
@@ -311,38 +313,48 @@ BEGIN
         EXECUTE 'ANALYZE '||turnrestrict_table||';';
     END;
 
+    --get source and target roads
+    BEGIN
+        RAISE NOTICE 'Setting source and target roads';
+        --source road
+        EXECUTE '
+            UPDATE '||link_table||'
+            SET     source_road_id = s_vert.road_id,
+                    target_road_id = t_vert.road_id
+            FROM    '||vert_table||' s_vert,
+                    '||vert_table||' t_vert
+            WHERE   '||link_table||'.source_vert = s_vert.vert_id
+            AND     '||link_table||'.target_vert = t_vert.vert_id';
+    END;
+
     --add stress to links
     BEGIN
         RAISE NOTICE 'Setting stress on links';
-        --f_stress
+        --source_stress
         EXECUTE '
             UPDATE '||link_table||'
-            SET     f_stress = CASE WHEN '||link_table||'.int_id = road.intersection_to THEN road.ft_seg_stress
+            SET     source_stress = CASE WHEN '||link_table||'.int_id = road.intersection_to THEN road.ft_seg_stress
                                     ELSE road.tf_seg_stress
                                     END
-            FROM    '||vert_table||' vert,
-                    '||road_table_||' road
-            WHERE   '||link_table||'.source_vert = vert.vert_id
-            AND     vert.road_id = road.road_id';
+            FROM    '||road_table_||' road
+            WHERE   '||link_table||'.source_road_id = road.road_id';
 
         --int_stress
         --need to set up intersection stress
 
-        --t_stress
+        --target_stress
         EXECUTE '
             UPDATE '||link_table||'
-            SET     t_stress = CASE WHEN '||link_table||'.int_id = road.intersection_to THEN road.tf_seg_stress
+            SET     target_stress = CASE WHEN '||link_table||'.int_id = road.intersection_to THEN road.tf_seg_stress
                                     ELSE road.ft_seg_stress
                                     END
-            FROM    '||vert_table||' vert,
-                    '||road_table_||' road
-            WHERE   '||link_table||'.target_vert = vert.vert_id
-            AND     vert.road_id = road.road_id';
+            FROM    '||road_table_||' road
+            WHERE   '||link_table||'.target_road_id = road.road_id';
 
         --link_stress
         EXECUTE '
             UPDATE '||link_table||'
-            SET     link_stress = GREATEST(f_stress,int_stress,t_stress)';
+            SET     link_stress = GREATEST(source_stress,int_stress,target_stress)';
     END;
 RETURN 't';
 END $func$ LANGUAGE plpgsql;

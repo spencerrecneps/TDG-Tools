@@ -5,26 +5,30 @@ CREATE OR REPLACE FUNCTION tdg.tdgNetworkCostFromDistance(
 RETURNS BOOLEAN AS $func$
 
 DECLARE
-    vert_table REGCLASS;
+    link_table REGCLASS;
 
 BEGIN
     raise notice 'PROCESSING:';
 
-    vert_table = road_table_ || '_net_vert';
+    link_table = road_table_ || '_net_link';
 
     IF road_ids_ IS NULL THEN
         EXECUTE '
-            UPDATE  '||vert_table||'
-            SET     vert_cost = ST_Length(r.geom)
-            FROM    '||road_table_||' r
-            WHERE   r.road_id = '||vert_table||'.road_id;';
+            UPDATE  '||link_table||'
+            SET     link_cost = ROUND((ST_Length(source_road.geom) + ST_Length(target_road.geom))/2)
+            FROM    '||road_table_||' source_road,
+                    '||road_table_||' target_road
+            WHERE   source_road.road_id = '||link_table||'.source_road_id
+            AND     target_road.road_id = '||link_table||'.target_road_id;';
     ELSE
         EXECUTE '
-            UPDATE  '||vert_table||'
-            SET     vert_cost = ST_Length(r.geom)
-            FROM    '||road_table_||' r
-            WHERE   r.road_id = '||vert_table||'.road_id
-            AND     r.road_id = ANY ($1);'
+            UPDATE  '||link_table||'
+            SET     link_cost = ST_Length(r.geom)
+            FROM    '||road_table_||' source_road,
+                    '||road_table_||' target_road
+            WHERE   source_road.road_id = '||link_table||'.source_road_id
+            AND     target_road.road_id = '||link_table||'.target_road_id
+            AND     (target_road_id = ANY ($1) OR source_road_id = ANY ($1));'
         USING   road_ids_;
     END IF;
 
