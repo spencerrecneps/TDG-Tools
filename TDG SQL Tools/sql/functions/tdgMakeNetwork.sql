@@ -307,6 +307,22 @@ BEGIN
         EXECUTE 'ANALYZE '||link_table||';';
         EXECUTE 'ANALYZE '||turnrestrict_table||';';
     END;
+
+    --add stress to links
+    BEGIN
+        RAISE NOTICE 'Setting stress on links';
+        EXECUTE '
+            UPDATE '||link_table||'
+            SET     link_stress = GREATEST(src_road.ft_seg_stress,trgt_road.ft_seg_stress)
+            FROM    '||vert_table||' src_vert,
+                    '||road_table_||' src_road,
+                    '||vert_table||' trgt_vert,
+                    '||road_table_||' trgt_road
+            WHERE   '||link_table||'.source_vert = src_vert.vert_id
+            AND     src_vert.road_id = src_road.road_id
+            AND     '||link_table||'.target_vert = trgt_vert.vert_id
+            AND     trgt_vert.road_id = trgt_road.road_id';
+    END;
 RETURN 't';
 END $func$ LANGUAGE plpgsql;
 ALTER FUNCTION tdg.tdgMakeNetwork(REGCLASS) OWNER TO gis;
