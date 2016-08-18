@@ -78,14 +78,16 @@ BEGIN
             CREATE TABLE '||link_table||' (
                 link_id SERIAL PRIMARY KEY,
                 int_id INT,
-                source_vert INT,
-                target_vert INT,
-                source_road_id INT,
-                target_road_id INT,
-                link_cost INT,
-                source_stress INT,
                 int_stress INT,
+                source_vert INT,
+                source_road_id INT,
+                source_road_dir VARCHAR(2),
+                source_stress INT,
+                target_vert INT,
+                target_road_id INT,
+                target_road_dir VARCHAR(2),
                 target_stress INT,
+                link_cost INT,
                 link_stress INT,
                 geom geometry(linestring,'||srid::TEXT||'));';
     END;
@@ -325,6 +327,29 @@ BEGIN
                     '||vert_table||' t_vert
             WHERE   '||link_table||'.source_vert = s_vert.vert_id
             AND     '||link_table||'.target_vert = t_vert.vert_id';
+    END;
+
+    --get road directions
+    BEGIN
+        RAISE NOTICE 'Setting road directions';
+        --source_road_dir
+        EXECUTE '
+            UPDATE '||link_table||'
+            SET     source_road_dir = CASE WHEN '||link_table||'.int_id = road.intersection_to THEN $1
+                                    ELSE $2
+                                    END
+            FROM    '||road_table_||' road
+            WHERE   '||link_table||'.source_road_id = road.road_id'
+        USING   'ft', 'tf';
+        --target_road_dir
+        EXECUTE '
+            UPDATE '||link_table||'
+            SET     target_road_dir = CASE WHEN '||link_table||'.int_id = road.intersection_to THEN $1
+                                    ELSE $2
+                                    END
+            FROM    '||road_table_||' road
+            WHERE   '||link_table||'.target_road_id = road.road_id'
+        USING   'ft', 'tf';
     END;
 
     --add stress to links
