@@ -78,14 +78,18 @@ BEGIN
             CREATE TABLE '||link_table||' (
                 link_id SERIAL PRIMARY KEY,
                 int_id INT,
+                turn_angle INT,
+                int_crossing BOOLEAN,
                 int_stress INT,
                 source_vert INT,
                 source_road_id INT,
                 source_road_dir VARCHAR(2),
+                source_road_azi INT,
                 source_stress INT,
                 target_vert INT,
                 target_road_id INT,
                 target_road_dir VARCHAR(2),
+                target_road_azi INT,
                 target_stress INT,
                 link_cost INT,
                 link_stress INT,
@@ -307,7 +311,9 @@ BEGIN
         EXECUTE '
             CREATE INDEX idx_'||table_name||'_vert_road_id ON '||vert_table||' (road_id);
             CREATE INDEX idx_'||table_name||'_link_int_id ON '||link_table||' (int_id);
-            CREATE INDEX idx_'||table_name||'_link_src_trgt ON '||link_table||' (source_vert,target_vert);';
+            CREATE INDEX idx_'||table_name||'_link_src_trgt ON '||link_table||' (source_vert,target_vert);
+            CREATE INDEX idx_'||table_name||'_link_src_rdid ON '||link_table||' (source_road_id);
+            CREATE INDEX idx_'||table_name||'_link_tgt_rdid ON '||link_table||' (target_road_id);';
     END;
 
     BEGIN
@@ -352,6 +358,38 @@ BEGIN
         USING   'ft', 'tf';
     END;
 
+    --set azimuths and turn angles
+    BEGIN
+        RAISE NOTICE 'Setting azimuths';
+        EXECUTE '
+            UPDATE '||link_table||'
+            SET     source_road_azi = CASE  WHEN source_road_dir = $1
+                                            THEN degrees(ST_Azimuth(ST_LineInterpolatePoint(roads1.geom,0.5),ST_StartPoint(roads1.geom)))
+                                            ELSE degrees(ST_Azimuth(ST_LineInterpolatePoint(roads1.geom,0.5),ST_EndPoint(roads1.geom)))
+                                            END,
+                    target_road_azi = CASE  WHEN target_road_dir = $1
+                                            THEN degrees(ST_Azimuth(ST_StartPoint(roads2.geom),ST_LineInterpolatePoint(roads2.geom,0.5)))
+                                            ELSE degrees(ST_Azimuth(ST_EndPoint(roads2.geom),ST_LineInterpolatePoint(roads2.geom,0.5)))
+                                            END
+            FROM    '||road_table_||' roads1,
+                    '||road_table_||' roads2
+            WHERE   source_road_id = roads1.road_id
+            AND     target_road_id = roads2.road_id;'
+        USING   'tf';
+    END;
+    BEGIN
+        RAISE NOTICE 'Setting turn angles';
+        EXECUTE '
+            UPDATE '||link_table||'
+            SET     turn_angle = (target_road_azi - source_road_azi + 360) % 360;';
+    END;
+
+    --set turn info
+    BEGIN
+        EXECUTE 'SELECT tdg.tdgSetTurnInfo($1)'
+        USING   link_table;
+    END;
+
     --add stress to links
     BEGIN
         RAISE NOTICE 'Setting stress on links';
@@ -365,7 +403,24 @@ BEGIN
             WHERE   '||link_table||'.source_road_id = road.road_id';
 
         --int_stress
-        --need to set up intersection stress
+        EXECUTE '
+            UPDATE '||link_table||'
+            SET     int_stress = roads.ft_int_stress
+            FROM    '||road_table_||' roads
+            WHERE   '||link_table||'.source_road_id = roads.road_id
+            AND     source_road_dir = $1;'
+        USING   'ft';
+        EXECUTE '
+            UPDATE '||link_table||'
+            SET     int_stress = roads.tf_int_stress
+            FROM    '||road_table_||' roads
+            WHERE   '||link_table||'.source_road_id = roads.road_id
+            AND     source_road_dir = $1;'
+        USING   'tf';
+        EXECUTE '
+            UPDATE '||link_table||'
+            SET     int_stress = 1
+            WHERE   NOT int_crossing;';
 
         --target_stress
         EXECUTE '
