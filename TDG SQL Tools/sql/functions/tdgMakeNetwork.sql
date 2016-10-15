@@ -85,11 +85,13 @@ BEGIN
                 source_road_id INT,
                 source_road_dir VARCHAR(2),
                 source_road_azi INT,
+                source_road_length INT,
                 source_stress INT,
                 target_vert INT,
                 target_road_id INT,
                 target_road_dir VARCHAR(2),
                 target_road_azi INT,
+                target_road_length INT,
                 target_stress INT,
                 link_cost INT,
                 link_stress INT,
@@ -388,6 +390,18 @@ BEGIN
     BEGIN
         EXECUTE 'SELECT tdg.tdgSetTurnInfo($1)'
         USING   link_table;
+    END;
+
+    --set lengths
+    BEGIN
+        EXECUTE '
+            UPDATE '||link_table||'
+            SET     source_road_length = ST_Length(roads1.geom),
+                    target_road_length = ST_Length(roads2.geom)
+            FROM    '||road_table_||' roads1,
+                    '||road_table_||' roads2
+            WHERE   source_road_id = roads1.road_id
+            AND     target_road_id = roads2.road_id;';
     END;
 
     --add stress to links
