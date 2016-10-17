@@ -19,6 +19,12 @@ DROP FUNCTION make_plpythonu();
 --give permission to the tdg schema
 GRANT ALL ON SCHEMA tdg TO PUBLIC;
 
+--create tdg schemas
 CREATE SCHEMA IF NOT EXISTS generated AUTHORIZATION gis;
 CREATE SCHEMA IF NOT EXISTS received AUTHORIZATION gis;
 CREATE SCHEMA IF NOT EXISTS scratch AUTHORIZATION gis;
+
+--drop tdg schemas from the extension so they get backed up
+ALTER EXTENSION TDG DROP SCHEMA generated;
+ALTER EXTENSION TDG DROP SCHEMA received;
+ALTER EXTENSION TDG DROP SCHEMA scratch;
