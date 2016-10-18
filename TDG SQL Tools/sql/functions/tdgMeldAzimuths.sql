@@ -121,48 +121,64 @@ BEGIN
             temp_buffers := 'f';
         END IF;
 
+        -- set up temp tables
+        EXECUTE '
+            CREATE TEMP TABLE tmp_meld_target_azis (
+                id INTEGER PRIMARY KEY,
+                azi FLOAT
+            )
+            ON COMMIT DROP';
+        EXECUTE '
+            INSERT INTO tmp_meld_target_azis (id, azi)
+            SELECT  '||target_pkid||',
+                    ST_Azimuth(
+                        ST_LineInterpolatePoint(
+                            '||target_geom_||',
+                            '||line_start_::TEXT||'
+                        ),
+                        ST_LineInterpolatePoint(
+                            '||target_geom_||',
+                            '||line_end_::TEXT||'
+                        )
+                    )
+            FROM    '||target_table_;
+        EXECUTE '
+            CREATE TEMP TABLE tmp_meld_source_azis (
+                id INTEGER PRIMARY KEY,
+                azi FLOAT
+            )
+            ON COMMIT DROP';
+        EXECUTE '
+            INSERT INTO tmp_meld_source_azis (id, azi)
+            SELECT  '||source_pkid||',
+                    ST_Azimuth(
+                        ST_LineInterpolatePoint(
+                            '||source_geom_||',
+                            '||line_start_::TEXT||'
+                        ),
+                        ST_LineInterpolatePoint(
+                            '||source_geom_||',
+                            '||line_end_::TEXT||'
+                        )
+                    )
+            FROM    '||source_table_;
+
         -- check for matches
         RAISE NOTICE 'Getting azimuth matches';
         sql := '
-            WITH target_azi AS (
-                SELECT  '||target_pkid' AS id,
-                        ST_Azimuth(
-                            ST_LineInterpolatePoint(
-                                src.'||target_geom_||',
-                                '||line_start_::TEXT||'
-                            ),
-                            ST_LineInterpolatePoint(
-                                src.'||target_geom_||',
-                                '||line_end_::TEXT||'
-                            )
-                        )
-            ),
-            source_azi AS (
-                SELECT  '||source_pkid||' AS id
-                        ST_Azimuth(
-                            ST_LineInterpolatePoint(
-                                src.'||source_geom_||',
-                                '||line_start_::TEXT||'
-                            ),
-                            ST_LineInterpolatePoint(
-                                src.'||source_geom_||',
-                                '||line_end_::TEXT||'
-                            )
-                        )
-            )
             UPDATE  '||target_table_||'
             SET     '||target_column_||' = (
                         SELECT      src.'||source_column_||'
                         FROM        '||source_table_||' src,
-                                    target_azi,
-                                    source_azi
+                                    tmp_meld_target_azis target_azi,
+                                    tmp_meld_source_azis source_azi
                         WHERE       '||target_table_||'.'||target_pkid||' = target_azi.id
-                        AND         '||source_table_||'.'||source_pkid||' = source_azi.id
+                        AND         src.'||source_pkid||' = source_azi.id
                         AND         ST_Intersects(
                                         '||target_table_||'.'||buffer_geom_||',
                                         src.'||source_geom_||'
                                     )
-                        AND         '!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!'
+                        AND         abs(cos(source_azi.azi - target_azi.azi)) >= cos(radians('||max_angle_diff_||'))
                         ORDER BY    ST_Distance(
                                         ST_LineInterpolatePoint(
                                             '||target_table_||'.'||target_geom_||',
@@ -175,13 +191,12 @@ BEGIN
                                             '||line_end_::TEXT||'
                                         ),
                                         src.'||source_geom_||'
-                                    ) / 2
-                                    ASC
+                                    ) ASC
                         LIMIT       1
                     )';
 
         IF only_nulls_ THEN
-            EXECUTE sql || ' AND '||target_table_||'.'||target_column_||' IS NULL';
+            EXECUTE sql || ' WHERE '||target_table_||'.'||target_column_||' IS NULL';
         ELSE
             EXECUTE sql;
         END IF;
