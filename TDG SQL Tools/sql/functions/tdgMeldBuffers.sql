@@ -1,4 +1,4 @@
-CREATE OR REPLACE FUNCTION tdg.tdgMeld(
+CREATE OR REPLACE FUNCTION tdg.tdgMeldBuffers(
     target_table_ REGCLASS,
     target_column_ TEXT,
     target_geom_ TEXT,
@@ -6,12 +6,9 @@ CREATE OR REPLACE FUNCTION tdg.tdgMeld(
     source_column_ TEXT,
     source_geom_ TEXT,
     tolerance_ FLOAT,
-    buffer_search_ DEFAULT 't',
-    azimuth_search DEFAULT 't',
-    midpoint_search DEFAULT 't',
-    only_nulls_ BOOLEAN DEFAULT 't',
     min_target_length_ FLOAT DEFAULT NULL,
     min_shared_length_pct_ FLOAT DEFAULT 0.9,
+    only_nulls_ BOOLEAN DEFAULT 't'
 )
 RETURNS BOOLEAN AS $func$
 
@@ -71,7 +68,6 @@ BEGIN
         END IF;
     END;
 
-    -- buffer search
     BEGIN
         -- add buffer geom column
         RAISE NOTICE 'Buffering...';
@@ -103,7 +99,7 @@ BEGIN
         EXECUTE 'ANALYZE '||target_table_||' (tmp_buffer_geom)';
 
         -- check for matches
-        RAISE NOTICE 'Getting first-pass matches';
+        RAISE NOTICE 'Getting buffer matches';
         sql := '
             UPDATE  '||target_table_||'
             SET     '||target_column_||' = (
@@ -142,5 +138,5 @@ BEGIN
 
     RETURN 't';
 END $func$ LANGUAGE plpgsql;
-ALTER FUNCTION tdg.tdgMeld(REGCLASS,TEXT,TEXT,REGCLASS,TEXT,TEXT,FLOAT,
-    BOOLEAN,FLOAT,FLOAT,BOOLEAN,BOOLEAN) OWNER TO gis;
+ALTER FUNCTION tdg.tdgMeldBuffers(REGCLASS,TEXT,TEXT,REGCLASS,TEXT,TEXT,FLOAT,
+    FLOAT,FLOAT,BOOLEAN) OWNER TO gis;

@@ -1,4 +1,4 @@
-CREATE OR REPLACE FUNCTION tdg.tdgMeld(
+CREATE OR REPLACE FUNCTION tdg.tdgMeldBuffers(
     target_table_ REGCLASS,
     target_column_ TEXT,
     target_geom_ TEXT,
@@ -6,12 +6,10 @@ CREATE OR REPLACE FUNCTION tdg.tdgMeld(
     source_column_ TEXT,
     source_geom_ TEXT,
     tolerance_ FLOAT,
-    buffer_search_ DEFAULT 't',
-    azimuth_search DEFAULT 't',
-    midpoint_search DEFAULT 't',
-    only_nulls_ BOOLEAN DEFAULT 't',
-    min_target_length_ FLOAT DEFAULT NULL,
-    min_shared_length_pct_ FLOAT DEFAULT 0.9,
+    max_angle_diff_ INTEGER DEFAULT 15,
+    line_start_ FLOAT DEFAULT 0.33,
+    line_end_ FLOAT DEFAULT 0.67,
+    only_nulls_ BOOLEAN DEFAULT 't'
 )
 RETURNS BOOLEAN AS $func$
 
@@ -22,11 +20,6 @@ DECLARE
 
 BEGIN
     raise notice 'PROCESSING:';
-
-    -- set vars
-    IF min_target_length_ IS NULL THEN
-        min_target_length_ := tolerance_ * 2.4;
-    END IF;
 
     -- check columns
     IF NOT tdgColumnCheck(target_table_,target_column_) THEN
@@ -71,46 +64,24 @@ BEGIN
         END IF;
     END;
 
-    -- buffer search
     BEGIN
-        -- add buffer geom column
-        RAISE NOTICE 'Buffering...';
-        EXECUTE '
-            ALTER TABLE '||target_table_||'
-            ADD COLUMN  tmp_buffer_geom geometry(multipolygon,'||target_srid::TEXT||')';
-
-        sql := '
-            UPDATE  '||target_table_||'
-            SET     tmp_buffer_geom = ST_Multi(
-                        ST_Buffer(
-                            '||target_geom_||',
-                            '||tolerance_::TEXT||',
-                            ''endcap=flat''
-                        )
-                    )';
-        IF only_nulls_ THEN
-            EXECUTE sql || ' WHERE '||target_column_||' IS NULL';
-        ELSE
-            EXECUTE sql;
-        END IF;
-
-        -- add buffer index
-        RAISE NOTICE 'Indexing buffer...';
-        EXECUTE '
-            CREATE INDEX tsidx_meldgeom
-            ON '||target_table_||'
-            USING GIST (tmp_buffer_geom)';
-        EXECUTE 'ANALYZE '||target_table_||' (tmp_buffer_geom)';
-
         -- check for matches
-        RAISE NOTICE 'Getting first-pass matches';
+        RAISE NOTICE 'Getting azimuth matches';
         sql := '
             UPDATE  '||target_table_||'
             SET     '||target_column_||' = (
                         SELECT      src.'||source_column_||'
                         FROM        '||source_table_||' src
-                        WHERE       ST_Intersects(
-                                        tmp_buffer_geom,
+                        WHERE       ST_DWithin(
+                                        '||target_table_||'.'||target_geom_||',
+                                        src.'||source_geom_||',
+                                        '||tolerance_::TEXT||'
+                                    )
+                        AND         ST_Intersects(
+                                        ST_Buffer(
+                                            '||target_table_||'.'||target_geom_||',
+                                            'tolerance_::TEXT'
+                                        ),
                                         src.'||source_geom_||'
                                     )
                         AND         ST_Length(
@@ -142,5 +113,5 @@ BEGIN
 
     RETURN 't';
 END $func$ LANGUAGE plpgsql;
-ALTER FUNCTION tdg.tdgMeld(REGCLASS,TEXT,TEXT,REGCLASS,TEXT,TEXT,FLOAT,
-    BOOLEAN,FLOAT,FLOAT,BOOLEAN,BOOLEAN) OWNER TO gis;
+ALTER FUNCTION tdg.tdgMeldBuffers(REGCLASS,TEXT,TEXT,REGCLASS,TEXT,TEXT,FLOAT,
+    BOOLEAN,FLOAT,FLOAT) OWNER TO gis;
