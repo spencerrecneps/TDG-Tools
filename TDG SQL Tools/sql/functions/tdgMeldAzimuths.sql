@@ -206,6 +206,9 @@ BEGIN
             RAISE NOTICE 'Dropping temporary buffers';
             EXECUTE 'ALTER TABLE '||target_table_||' DROP COLUMN tmp_buffer_geom';
         END IF;
+
+        DROP TABLE IF EXISTS tmp_meld_target_azis;
+        DROP TABLE IF EXISTS tmp_meld_source_azis;
     END;
 
     RETURN 't';
