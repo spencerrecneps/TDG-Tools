@@ -17,7 +17,14 @@ BEGIN
     avg_dist := AVG(
                     ST_Distance(
                         ST_LineInterpolatePoint(base_geom_,i::FLOAT * seg_length_ / base_length),
-                        comp_geom_
+                        -- comp_geom_
+                        ST_LineInterpolatePoint(
+                            comp_geom_,
+                            ST_LineLocatePoint(
+                                comp_geom_,
+                                ST_LineInterpolatePoint(base_geom_,i::FLOAT * seg_length_ / base_length)
+                            )
+                        )
                     )
                 )
     FROM        generate_series(0,num_points) i
