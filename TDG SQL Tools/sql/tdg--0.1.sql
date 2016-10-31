@@ -25,9 +25,9 @@ CREATE SCHEMA IF NOT EXISTS received AUTHORIZATION gis;
 CREATE SCHEMA IF NOT EXISTS scratch AUTHORIZATION gis;
 
 --drop tdg schemas from the extension so they get backed up
-ALTER EXTENSION TDG DROP SCHEMA generated;
-ALTER EXTENSION TDG DROP SCHEMA received;
-ALTER EXTENSION TDG DROP SCHEMA scratch;
+--ALTER EXTENSION TDG DROP SCHEMA generated;
+--ALTER EXTENSION TDG DROP SCHEMA received;
+--ALTER EXTENSION TDG DROP SCHEMA scratch;
 CREATE TYPE tdg.tdgShortestPathType AS (
     path_id INT,
     from_vert INT,
@@ -750,6 +750,55 @@ BEGIN
     RETURN 't';
 END $func$ LANGUAGE plpgsql;
 ALTER FUNCTION tdg.tdgGenerateCrossStreetData(REGCLASS,INTEGER[]) OWNER TO gis;
+CREATE OR REPLACE FUNCTION tdg.tdgNetworkCostFromTime(
+    road_table_ REGCLASS,
+    speed_ FLOAT,
+    feet_per_second_ BOOLEAN DEFAULT NULL,
+    road_ids_ INTEGER[] DEFAULT NULL)
+--populate cross-street data
+RETURNS BOOLEAN AS $func$
+
+DECLARE
+    link_table REGCLASS;
+    speed_fps FLOAT;
+
+BEGIN
+    raise notice 'PROCESSING:';
+
+    IF speed_ = 0 THEN
+        RETURN 'f';
+    END IF;
+
+    link_table = road_table_ || '_net_link';
+
+    -- convert to feet per second if necessary
+    IF feet_per_second_ IS NULL THEN
+        speed_fps := speed_ * 5280 / 3600;
+    ELSE
+        speed_fps := speed_;
+    END IF;
+
+    IF road_ids_ IS NULL THEN
+        EXECUTE '
+            UPDATE  '||link_table||'
+            SET     link_cost = ST_Length(r.geom) / $1
+            FROM    '||road_table_||' r
+            WHERE   r.road_id = '||link_table||'.road_id;'
+        USING   speed_fps;
+    ELSE
+        EXECUTE '
+            UPDATE  '||link_table||'
+            SET     link_cost = ST_Length(r.geom) / $1
+            FROM    '||road_table_||' r
+            WHERE   r.road_id = '||link_table||'.road_id
+            AND     r.road_id = ANY ($1);'
+        USING   speed_fps,
+                road_ids_;
+    END IF;
+
+    RETURN 't';
+END $func$ LANGUAGE plpgsql;
+ALTER FUNCTION tdg.tdgNetworkCostFromTime(REGCLASS,FLOAT,BOOLEAN,INTEGER[]) OWNER TO gis;
 CREATE OR REPLACE FUNCTION tdg.tdgTableCheck (input_table_ TEXT)
 RETURNS BOOLEAN AS $func$
 
@@ -1429,55 +1478,388 @@ BEGIN
 RETURN 't';
 END $func$ LANGUAGE plpgsql;
 ALTER FUNCTION tdgUpdateNetwork(REGCLASS,INT[]) OWNER TO gis;
-CREATE OR REPLACE FUNCTION tdg.tdgNetworkCostFromTime(
-    road_table_ REGCLASS,
-    speed_ FLOAT,
-    feet_per_second_ BOOLEAN DEFAULT NULL,
-    road_ids_ INTEGER[] DEFAULT NULL)
---populate cross-street data
+CREATE OR REPLACE FUNCTION tdg.tdgMeldAzimuths(
+    target_table_ REGCLASS,
+    target_column_ TEXT,
+    target_geom_ TEXT,
+    source_table_ REGCLASS,
+    source_column_ TEXT,
+    source_geom_ TEXT,
+    tolerance_ FLOAT,
+    buffer_geom_ TEXT DEFAULT NULL,
+    max_angle_diff_ INTEGER DEFAULT 15,
+    line_start_ FLOAT DEFAULT 0.33,
+    line_end_ FLOAT DEFAULT 0.67,
+    only_nulls_ BOOLEAN DEFAULT 't',
+    nullify_ BOOLEAN DEFAULT 'f'
+)
 RETURNS BOOLEAN AS $func$
 
 DECLARE
-    link_table REGCLASS;
-    speed_fps FLOAT;
+    sql TEXT;
+    target_srid INTEGER;
+    source_srid INTEGER;
+    buffer_srid INTEGER;
+    temp_buffers BOOLEAN;
+    target_pkid TEXT;
+    source_pkid TEXT;
 
 BEGIN
     raise notice 'PROCESSING:';
 
-    IF speed_ = 0 THEN
-        RETURN 'f';
+    -- check columns
+    IF NOT tdgColumnCheck(target_table_,target_column_) THEN
+        RAISE EXCEPTION 'Column % not found', target_column_;
+    END IF;
+    IF NOT tdgColumnCheck(target_table_,target_geom_) THEN
+        RAISE EXCEPTION 'Column % not found', target_geom_;
+    END IF;
+    IF buffer_geom_ IS NOT NULL AND NOT tdgColumnCheck(target_table_,buffer_geom_) THEN
+        RAISE EXCEPTION 'Column % not found', buffer_geom_;
+    END IF;
+    IF NOT tdgColumnCheck(source_table_,source_column_) THEN
+        RAISE EXCEPTION 'Column % not found', source_column_;
+    END IF;
+    IF NOT tdgColumnCheck(source_table_,source_geom_) THEN
+        RAISE EXCEPTION 'Column % not found', source_geom_;
     END IF;
 
-    link_table = road_table_ || '_net_link';
+    -- srid check
+    BEGIN
+        RAISE NOTICE 'Getting SRID of target geometry';
+        target_srid := tdgGetSRID(target_table_,target_geom_);
+        IF target_srid IS NULL THEN
+            RAISE EXCEPTION 'ERROR: Cannot determine the srid of the geometry in table %', target_table_;
+        END IF;
+        raise NOTICE '  -----> SRID found %',target_srid;
 
-    -- convert to feet per second if necessary
-    IF feet_per_second_ IS NULL THEN
-        speed_fps := speed_ * 5280 / 3600;
-    ELSE
-        speed_fps := speed_;
-    END IF;
+        RAISE NOTICE 'Getting SRID of source geometry';
+        source_srid := tdgGetSRID(source_table_,source_geom_);
+        IF source_srid IS NULL THEN
+            RAISE EXCEPTION 'ERROR: Cannot determine the srid of the geometry in table %', source_table_;
+        END IF;
+        raise NOTICE '  -----> SRID found %',source_srid;
 
-    IF road_ids_ IS NULL THEN
+        IF NOT target_srid = source_srid THEN
+            RAISE EXCEPTION 'SRID on geometry columns do not match';
+        END IF;
+
+        IF buffer_geom_ IS NOT NULL THEN
+            RAISE NOTICE 'Getting SRID of buffer geometry';
+            buffer_srid := tdgGetSRID(target_table_,buffer_geom_);
+            IF NOT target_srid = buffer_srid THEN
+                RAISE EXCEPTION 'SRID on geometry columns do not match';
+            END IF;
+        END IF;
+    END;
+
+    -- get target and source pkid columns
+    target_pkid := tdg.tdgGetPkColumn(target_table_);
+    source_pkid := tdg.tdgGetPkColumn(source_table_);
+
+    BEGIN
+        -- set nulls
+        IF nullify_ THEN
+            EXECUTE '
+                UPDATE  '||target_table_||'
+                SET     '||target_column_||' = NULL';
+        END IF;
+
+        -- add buffer geom column
+        IF buffer_geom_ IS NULL THEN
+            temp_buffers := 't';
+            RAISE NOTICE 'Buffering...';
+            EXECUTE '
+                ALTER TABLE '||target_table_||'
+                ADD COLUMN  tmp_buffer_geom geometry(multipolygon,'||target_srid::TEXT||')';
+
+            sql := '
+                UPDATE  '||target_table_||'
+                SET     tmp_buffer_geom = ST_Multi(
+                            ST_Buffer(
+                                '||target_geom_||',
+                                '||tolerance_::TEXT||',
+                                ''endcap=flat''
+                            )
+                        )';
+            IF only_nulls_ THEN
+                EXECUTE sql || ' WHERE '||target_column_||' IS NULL';
+            ELSE
+                EXECUTE sql;
+            END IF;
+
+            -- add buffer index
+            RAISE NOTICE 'Indexing buffer...';
+            EXECUTE '
+                CREATE INDEX tsidx_meldgeom
+                ON '||target_table_||'
+                USING GIST (tmp_buffer_geom)';
+            EXECUTE 'ANALYZE '||target_table_||' (tmp_buffer_geom)';
+
+            buffer_geom_ := 'tmp_buffer_geom';
+        ELSE
+            temp_buffers := 'f';
+        END IF;
+
+        -- set up temp tables
         EXECUTE '
-            UPDATE  '||link_table||'
-            SET     link_cost = ST_Length(r.geom) / $1
-            FROM    '||road_table_||' r
-            WHERE   r.road_id = '||link_table||'.road_id;'
-        USING   speed_fps;
-    ELSE
+            CREATE TEMP TABLE tmp_meld_target_azis (
+                id INTEGER PRIMARY KEY,
+                azi FLOAT
+            )
+            ON COMMIT DROP';
         EXECUTE '
-            UPDATE  '||link_table||'
-            SET     link_cost = ST_Length(r.geom) / $1
-            FROM    '||road_table_||' r
-            WHERE   r.road_id = '||link_table||'.road_id
-            AND     r.road_id = ANY ($1);'
-        USING   speed_fps,
-                road_ids_;
-    END IF;
+            INSERT INTO tmp_meld_target_azis (id, azi)
+            SELECT  '||target_pkid||',
+                    ST_Azimuth(
+                        ST_LineInterpolatePoint(
+                            '||target_geom_||',
+                            '||line_start_::TEXT||'
+                        ),
+                        ST_LineInterpolatePoint(
+                            '||target_geom_||',
+                            '||line_end_::TEXT||'
+                        )
+                    )
+            FROM    '||target_table_;
+        EXECUTE '
+            CREATE TEMP TABLE tmp_meld_source_azis (
+                id INTEGER PRIMARY KEY,
+                azi FLOAT
+            )
+            ON COMMIT DROP';
+        EXECUTE '
+            INSERT INTO tmp_meld_source_azis (id, azi)
+            SELECT  '||source_pkid||',
+                    ST_Azimuth(
+                        ST_LineInterpolatePoint(
+                            '||source_geom_||',
+                            '||line_start_::TEXT||'
+                        ),
+                        ST_LineInterpolatePoint(
+                            '||source_geom_||',
+                            '||line_end_::TEXT||'
+                        )
+                    )
+            FROM    '||source_table_;
+
+        -- check for matches
+        RAISE NOTICE 'Getting azimuth matches';
+        sql := '
+            UPDATE  '||target_table_||'
+            SET     '||target_column_||' = (
+                        SELECT      src.'||source_column_||'
+                        FROM        '||source_table_||' src,
+                                    tmp_meld_target_azis target_azi,
+                                    tmp_meld_source_azis source_azi
+                        WHERE       '||target_table_||'.'||target_pkid||' = target_azi.id
+                        AND         src.'||source_pkid||' = source_azi.id
+                        AND         ST_Intersects(
+                                        '||target_table_||'.'||buffer_geom_||',
+                                        src.'||source_geom_||'
+                                    )
+                        AND         abs(cos(source_azi.azi - target_azi.azi)) >= cos(radians('||max_angle_diff_||'))
+                        ORDER BY    ST_Distance(
+                                        ST_LineInterpolatePoint(
+                                            '||target_table_||'.'||target_geom_||',
+                                            '||line_start_::TEXT||'
+                                        ),
+                                        src.'||source_geom_||'
+                                    ) + ST_Distance(
+                                        ST_LineInterpolatePoint(
+                                            '||target_table_||'.'||target_geom_||',
+                                            '||line_end_::TEXT||'
+                                        ),
+                                        src.'||source_geom_||'
+                                    ) ASC
+                        LIMIT       1
+                    )';
+
+        IF only_nulls_ THEN
+            EXECUTE sql || ' WHERE '||target_table_||'.'||target_column_||' IS NULL';
+        ELSE
+            EXECUTE sql;
+        END IF;
+
+        IF temp_buffers THEN
+            -- drop temporary buffers
+            RAISE NOTICE 'Dropping temporary buffers';
+            EXECUTE 'ALTER TABLE '||target_table_||' DROP COLUMN tmp_buffer_geom';
+        END IF;
+
+        DROP TABLE IF EXISTS tmp_meld_target_azis;
+        DROP TABLE IF EXISTS tmp_meld_source_azis;
+    END;
 
     RETURN 't';
 END $func$ LANGUAGE plpgsql;
-ALTER FUNCTION tdg.tdgNetworkCostFromTime(REGCLASS,FLOAT,BOOLEAN,INTEGER[]) OWNER TO gis;
+ALTER FUNCTION tdg.tdgMeldAzimuths(REGCLASS,TEXT,TEXT,REGCLASS,TEXT,TEXT,FLOAT,
+    TEXT,INTEGER,FLOAT,FLOAT,BOOLEAN,BOOLEAN) OWNER TO gis;
+CREATE OR REPLACE FUNCTION tdg.tdgMeldBuffers(
+    target_table_ REGCLASS,
+    target_column_ TEXT,
+    target_geom_ TEXT,
+    source_table_ REGCLASS,
+    source_column_ TEXT,
+    source_geom_ TEXT,
+    tolerance_ FLOAT,
+    buffer_geom_ TEXT DEFAULT NULL,
+    min_target_length_ FLOAT DEFAULT NULL,
+    min_shared_length_pct_ FLOAT DEFAULT 0.9,
+    nullify_ BOOLEAN DEFAULT 'f',
+    only_nulls_ BOOLEAN DEFAULT 't'
+)
+RETURNS BOOLEAN AS $func$
+
+DECLARE
+    sql TEXT;
+    target_srid INTEGER;
+    source_srid INTEGER;
+    buffer_srid INTEGER;
+    temp_buffers BOOLEAN;
+
+BEGIN
+    raise notice 'PROCESSING:';
+
+    -- set vars
+    IF min_target_length_ IS NULL THEN
+        min_target_length_ := tolerance_ * 2.4;
+    END IF;
+
+    -- check columns
+    IF NOT tdgColumnCheck(target_table_,target_column_) THEN
+        RAISE EXCEPTION 'Column % not found', target_column_;
+    END IF;
+    IF NOT tdgColumnCheck(target_table_,target_geom_) THEN
+        RAISE EXCEPTION 'Column % not found', target_geom_;
+    END IF;
+    IF buffer_geom_ IS NOT NULL AND NOT tdgColumnCheck(target_table_,buffer_geom_) THEN
+        RAISE EXCEPTION 'Column % not found', buffer_geom_;
+    END IF;
+    IF NOT tdgColumnCheck(source_table_,source_column_) THEN
+        RAISE EXCEPTION 'Column % not found', source_column_;
+    END IF;
+    IF NOT tdgColumnCheck(source_table_,source_geom_) THEN
+        RAISE EXCEPTION 'Column % not found', source_geom_;
+    END IF;
+
+    -- srid check
+    BEGIN
+        RAISE NOTICE 'Getting SRID of target geometry';
+        target_srid := tdgGetSRID(target_table_,target_geom_);
+        IF target_srid IS NULL THEN
+            RAISE EXCEPTION 'ERROR: Cannot determine the srid of the geometry in table %', target_table_;
+        END IF;
+        raise NOTICE '  -----> SRID found %',target_srid;
+
+        RAISE NOTICE 'Getting SRID of source geometry';
+        source_srid := tdgGetSRID(source_table_,source_geom_);
+        IF source_srid IS NULL THEN
+            RAISE EXCEPTION 'ERROR: Cannot determine the srid of the geometry in table %', source_table_;
+        END IF;
+        raise NOTICE '  -----> SRID found %',source_srid;
+
+        IF NOT target_srid = source_srid THEN
+            RAISE EXCEPTION 'SRID on geometry columns do not match';
+        END IF;
+
+        IF buffer_geom_ IS NOT NULL THEN
+            RAISE NOTICE 'Getting SRID of buffer geometry';
+            buffer_srid := tdgGetSRID(target_table_,buffer_geom_);
+            IF NOT target_srid = buffer_srid THEN
+                RAISE EXCEPTION 'SRID on geometry columns do not match';
+            END IF;
+        END IF;
+    END;
+
+    BEGIN
+        -- set nulls
+        IF nullify_ THEN
+            EXECUTE '
+                UPDATE  '||target_table_||'
+                SET     '||target_column_||' = NULL';
+        END IF;
+
+        -- add buffer geom column
+        IF buffer_geom_ IS NULL THEN
+            temp_buffers := 't';
+            RAISE NOTICE 'Buffering...';
+            EXECUTE '
+                ALTER TABLE '||target_table_||'
+                ADD COLUMN  tmp_buffer_geom geometry(multipolygon,'||target_srid::TEXT||')';
+
+            sql := '
+                UPDATE  '||target_table_||'
+                SET     tmp_buffer_geom = ST_Multi(
+                            ST_Buffer(
+                                '||target_geom_||',
+                                '||tolerance_::TEXT||',
+                                ''endcap=flat''
+                            )
+                        )';
+            IF only_nulls_ THEN
+                EXECUTE sql || ' WHERE '||target_column_||' IS NULL';
+            ELSE
+                EXECUTE sql;
+            END IF;
+
+            -- add buffer index
+            RAISE NOTICE 'Indexing buffer...';
+            EXECUTE '
+                CREATE INDEX tsidx_meldgeom
+                ON '||target_table_||'
+                USING GIST (tmp_buffer_geom)';
+            EXECUTE 'ANALYZE '||target_table_||' (tmp_buffer_geom)';
+
+            buffer_geom_ := 'tmp_buffer_geom';
+        ELSE
+            temp_buffers := 'f';
+        END IF;
+
+        -- check for matches
+        RAISE NOTICE 'Getting buffer matches';
+        sql := '
+            UPDATE  '||target_table_||'
+            SET     '||target_column_||' = (
+                        SELECT      src.'||source_column_||'
+                        FROM        '||source_table_||' src
+                        WHERE       ST_Intersects(
+                                        '||target_table_||'.'||buffer_geom_||',
+                                        src.'||source_geom_||'
+                                    )
+                        AND         ST_Length(
+                                        ST_Intersection(
+                                            '||target_table_||'.'||buffer_geom_||',
+                                            src.'||source_geom_||'
+                                        )
+                                    ) >= '||min_shared_length_pct_::FLOAT||' * ST_Length('||target_table_||'.'||target_geom_||')
+                        ORDER BY    ST_Length(
+                                        ST_Intersection(
+                                            '||target_table_||'.'||buffer_geom_||',
+                                            src.'||source_geom_||'
+                                        )
+                                    ) DESC
+                        LIMIT       1
+                    )
+            WHERE   ST_Length('||target_table_||'.'||target_geom_||') > '||min_target_length_::TEXT;
+
+        IF only_nulls_ THEN
+            EXECUTE sql || ' AND '||target_table_||'.'||target_column_||' IS NULL';
+        ELSE
+            EXECUTE sql;
+        END IF;
+
+        IF temp_buffers THEN
+            -- drop temporary buffers
+            RAISE NOTICE 'Dropping temporary buffers';
+            EXECUTE 'ALTER TABLE '||target_table_||' DROP COLUMN tmp_buffer_geom';
+        END IF;
+    END;
+
+    RETURN 't';
+END $func$ LANGUAGE plpgsql;
+ALTER FUNCTION tdg.tdgMeldBuffers(REGCLASS,TEXT,TEXT,REGCLASS,TEXT,TEXT,FLOAT,
+    TEXT,FLOAT,FLOAT,BOOLEAN,BOOLEAN) OWNER TO gis;
 CREATE OR REPLACE FUNCTION tdg.tdgSetRoadIntersections(
     int_table_ REGCLASS,
     road_table_ REGCLASS,
@@ -1893,6 +2275,41 @@ BEGIN
 
 END $func$ LANGUAGE plpgsql;
 ALTER FUNCTION tdg.tdgGetColumnNames(REGCLASS,BOOLEAN) OWNER TO gis;
+CREATE OR REPLACE FUNCTION tdg.tdgCompareLines(
+    base_geom_ geometry,
+    comp_geom_ geometry,
+    seg_length_ FLOAT
+)
+RETURNS FLOAT AS $func$
+
+DECLARE
+    base_length FLOAT;
+    num_points INTEGER;
+    avg_dist FLOAT;
+
+BEGIN
+    base_length := ST_Length(base_geom_);
+    num_points := CEILING(base_length::FLOAT/seg_length_);
+
+    avg_dist := AVG(
+                    ST_Distance(
+                        ST_LineInterpolatePoint(base_geom_,i::FLOAT * seg_length_ / base_length),
+                        -- comp_geom_
+                        ST_LineInterpolatePoint(
+                            comp_geom_,
+                            ST_LineLocatePoint(
+                                comp_geom_,
+                                ST_LineInterpolatePoint(base_geom_,i::FLOAT * seg_length_ / base_length)
+                            )
+                        )
+                    )
+                )
+    FROM        generate_series(0,num_points) i
+    WHERE       i * seg_length_ <= base_length;
+
+    RETURN avg_dist;
+END $func$ LANGUAGE plpgsql;
+ALTER FUNCTION tdg.tdgCompareLines(geometry,geometry,FLOAT) OWNER TO gis;
 CREATE OR REPLACE FUNCTION tdg.tdgMakeIntersections (
     road_table_ REGCLASS,
     z_vals_ BOOLEAN DEFAULT 'f')
@@ -2722,17 +3139,27 @@ CREATE OR REPLACE FUNCTION tdg.tdgMeld(
     source_column_ TEXT,
     source_geom_ TEXT,
     tolerance_ FLOAT,
-    only_nulls_ BOOLEAN DEFAULT 't'
+    buffer_search_ DEFAULT 't',
+    azimuth_search DEFAULT 't',
+    midpoint_search DEFAULT 't',
+    only_nulls_ BOOLEAN DEFAULT 't',
+    min_target_length_ FLOAT DEFAULT NULL,
+    min_shared_length_pct_ FLOAT DEFAULT 0.9,
 )
 RETURNS BOOLEAN AS $func$
 
 DECLARE
-    target_record RECORD;
+    sql TEXT;
     target_srid INTEGER;
     source_srid INTEGER;
 
 BEGIN
     raise notice 'PROCESSING:';
+
+    -- set vars
+    IF min_target_length_ IS NULL THEN
+        min_target_length_ := tolerance_ * 2.4;
+    END IF;
 
     -- check columns
     IF NOT tdgColumnCheck(target_table_,target_column_) THEN
@@ -2777,29 +3204,40 @@ BEGIN
         END IF;
     END;
 
-    -- make first pass for easy matches (31 minutes unindexed, 12 mins with index)
+    -- buffer search
     BEGIN
-        -- add buffer geom
+        -- add buffer geom column
+        RAISE NOTICE 'Buffering...';
         EXECUTE '
             ALTER TABLE '||target_table_||'
             ADD COLUMN  tmp_buffer_geom geometry(multipolygon,'||target_srid::TEXT||')';
-        EXECUTE '
+
+        sql := '
             UPDATE  '||target_table_||'
             SET     tmp_buffer_geom = ST_Multi(
                         ST_Buffer(
                             '||target_geom_||',
-                            $1,
+                            '||tolerance_::TEXT||',
                             ''endcap=flat''
                         )
-                    )'
-        USING   tolerance_;
+                    )';
+        IF only_nulls_ THEN
+            EXECUTE sql || ' WHERE '||target_column_||' IS NULL';
+        ELSE
+            EXECUTE sql;
+        END IF;
+
+        -- add buffer index
+        RAISE NOTICE 'Indexing buffer...';
         EXECUTE '
             CREATE INDEX tsidx_meldgeom
             ON '||target_table_||'
             USING GIST (tmp_buffer_geom)';
         EXECUTE 'ANALYZE '||target_table_||' (tmp_buffer_geom)';
 
-        EXECUTE '
+        -- check for matches
+        RAISE NOTICE 'Getting first-pass matches';
+        sql := '
             UPDATE  '||target_table_||'
             SET     '||target_column_||' = (
                         SELECT      src.'||source_column_||'
@@ -2813,7 +3251,7 @@ BEGIN
                                             tmp_buffer_geom,
                                             src.'||source_geom_||'
                                         )
-                                    ) >= 0.7 * ST_Length('||target_table_||'.'||target_geom_||')
+                                    ) >= '||min_shared_length_pct_::FLOAT||' * ST_Length('||target_table_||'.'||target_geom_||')
                         ORDER BY    ST_Length(
                                         ST_Intersection(
                                             tmp_buffer_geom,
@@ -2822,15 +3260,23 @@ BEGIN
                                     ) DESC
                         LIMIT       1
                     )
-            WHERE   ST_Length('||target_table_||'.'||target_geom_||') > ($1 * 1.2)'
-        USING   tolerance_;
+            WHERE   ST_Length('||target_table_||'.'||target_geom_||') > '||min_target_length_::TEXT;
 
+        IF only_nulls_ THEN
+            EXECUTE sql || ' AND '||target_table_||'.'||target_column_||' IS NULL';
+        ELSE
+            EXECUTE sql;
+        END IF;
+
+        -- drop temporary buffers
+        RAISE NOTICE 'Dropping temporary buffers';
         EXECUTE 'ALTER TABLE '||target_table_||' DROP COLUMN tmp_buffer_geom';
     END;
 
     RETURN 't';
 END $func$ LANGUAGE plpgsql;
-ALTER FUNCTION tdg.tdgMeld(REGCLASS,TEXT,TEXT,REGCLASS,TEXT,TEXT,FLOAT,BOOLEAN) OWNER TO gis;
+ALTER FUNCTION tdg.tdgMeld(REGCLASS,TEXT,TEXT,REGCLASS,TEXT,TEXT,FLOAT,
+    BOOLEAN,FLOAT,FLOAT,BOOLEAN,BOOLEAN) OWNER TO gis;
 CREATE OR REPLACE FUNCTION tdg.tdgMakeIntersectionTriggers(
     int_table_ REGCLASS,
     table_name_ TEXT)
