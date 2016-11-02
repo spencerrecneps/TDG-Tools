@@ -97,9 +97,12 @@ BEGIN
                 UPDATE  '||target_table_||'
                 SET     tmp_buffer_geom = ST_Multi(
                             ST_Buffer(
-                                '||target_geom_||',
-                                '||tolerance_::TEXT||',
-                                ''endcap=flat''
+                                ST_Buffer(
+                                    '||target_geom_||',
+                                    '||(tolerance_+2)::TEXT||',
+                                    ''endcap=flat''
+                                ),
+                                -2
                             )
                         )';
             IF only_nulls_ THEN
