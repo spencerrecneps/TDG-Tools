@@ -14,17 +14,13 @@ BEGIN
 
     IF road_ids_ IS NULL THEN
         EXECUTE '
-            UPDATE  '||link_table||'
-            SET     link_cost = ST_Length(r.geom)
-            FROM    '||road_table_||' r
-            WHERE   r.road_id = '||link_table||'.road_id;';
+            UPDATE '||link_table||'
+            SET     link_cost = ROUND((source_road_length + target_road_length) / 2);';
     ELSE
         EXECUTE '
-            UPDATE  '||link_table||'
-            SET     link_cost = ST_Length(r.geom)
-            FROM    '||road_table_||' r
-            WHERE   r.road_id = '||link_table||'.road_id
-            AND     r.road_id = ANY ($1);'
+            UPDATE '||link_table||'
+            SET     link_cost = ROUND((source_road_length + target_road_length) / 2)
+            WHERE   (target_road_id = ANY ($1) OR source_road_id = ANY ($1));'
         USING   road_ids_;
     END IF;
 

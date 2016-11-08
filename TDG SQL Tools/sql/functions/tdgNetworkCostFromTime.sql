@@ -7,7 +7,7 @@ CREATE OR REPLACE FUNCTION tdg.tdgNetworkCostFromTime(
 RETURNS BOOLEAN AS $func$
 
 DECLARE
-    link_table REGCLASS;
+    vert_table REGCLASS;
     speed_fps FLOAT;
 
 BEGIN
@@ -17,7 +17,7 @@ BEGIN
         RETURN 'f';
     END IF;
 
-    link_table = road_table_ || '_net_link';
+    vert_table = road_table_ || '_net_vert';
 
     -- convert to feet per second if necessary
     IF feet_per_second_ IS NULL THEN
@@ -28,17 +28,17 @@ BEGIN
 
     IF road_ids_ IS NULL THEN
         EXECUTE '
-            UPDATE  '||link_table||'
-            SET     link_cost = ST_Length(r.geom) / $1
+            UPDATE  '||vert_table||'
+            SET     vert_cost = ST_Length(r.geom) / $1
             FROM    '||road_table_||' r
-            WHERE   r.road_id = '||link_table||'.road_id;'
+            WHERE   r.road_id = '||vert_table||'.road_id;'
         USING   speed_fps;
     ELSE
         EXECUTE '
-            UPDATE  '||link_table||'
-            SET     link_cost = ST_Length(r.geom) / $1
+            UPDATE  '||vert_table||'
+            SET     vert_cost = ST_Length(r.geom) / $1
             FROM    '||road_table_||' r
-            WHERE   r.road_id = '||link_table||'.road_id
+            WHERE   r.road_id = '||vert_table||'.road_id
             AND     r.road_id = ANY ($1);'
         USING   speed_fps,
                 road_ids_;

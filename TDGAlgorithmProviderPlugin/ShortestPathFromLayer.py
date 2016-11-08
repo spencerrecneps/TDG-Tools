@@ -4,8 +4,8 @@
 ***************************************************************************
     ShortestPathIntersections.py
     ---------------------
-    Date                 : October 2015
-    Copyright            : (C) 2015 by Spencer Gardner
+    Date                 : August 2016
+    Copyright            : (C) 2016 by Spencer Gardner
     Email                : spencergardner at gmail dot com
 ***************************************************************************
 *                                                                         *
@@ -18,8 +18,8 @@
 """
 
 __author__ = 'Spencer Gardner'
-__date__ = 'October 2015'
-__copyright__ = '(C) 2015, Spencer Gardner'
+__date__ = 'August 2016'
+__copyright__ = '(C) 2016, Spencer Gardner'
 
 # This will get replaced with a git SHA1 when you do a git archive
 
@@ -49,8 +49,8 @@ import networkx as nx
 
 class ShortestPathFromLayer(TDGAlgorithm):
     """This algorithm takes an input road network and
-    an origin-destination intersection pair and finds
-    the shortest path between the two.
+    a layer of origin-destination points and finds
+    the shortest path between the each point.
     """
 
     # Constants used to refer to parameters and outputs. They will be
@@ -59,7 +59,6 @@ class ShortestPathFromLayer(TDGAlgorithm):
 
     ROADS_LAYER = 'ROADS_LAYER'
     DESTINATIONS_LAYER = 'DESTINATIONS_LAYER'
-    VERT_ID_FIELD = 'VERT_ID_FIELD'
     STRESS = 'STRESS'
     MAX_COST = 'MAX_COST'
     KEEP_RAW = 'KEEP_RAW'
@@ -98,25 +97,13 @@ class ShortestPathFromLayer(TDGAlgorithm):
             )
         )
 
-        # Input roads layer. Must be line type
+        # Input destinations layer. Must be point type
         # It is a mandatory (not optional) one, hence the False argument
         self.addParameter(
             ParameterVector(
                 self.DESTINATIONS_LAYER,
-                self.tr('Destinations layer (must have vertex IDs)'),
-                [ParameterVector.VECTOR_TYPE_ANY],
-                optional=False
-            )
-        )
-
-        # Field with vertex IDs
-        # Required
-        self.addParameter(
-            ParameterTableField(
-                self.VERT_ID_FIELD,
-                self.tr('Field containing the network vertex IDs'),
-                parent=self.DESTINATIONS_LAYER,
-                datatype = ParameterTableField.DATA_TYPE_NUMBER,
+                self.tr('Destinations layer'),
+                [ParameterVector.VECTOR_TYPE_POINT],
                 optional=False
             )
         )
@@ -185,7 +172,6 @@ class ShortestPathFromLayer(TDGAlgorithm):
             self.getParameterValue(self.ROADS_LAYER))
         destsLayer = dataobjects.getObjectFromUri(
             self.getParameterValue(self.DESTINATIONS_LAYER))
-        vertIdField = self.getParameterValue(self.VERT_ID_FIELD)
         stress = self.getParameterValue(self.STRESS)
         maxCost = self.getParameterValue(self.MAX_COST)
         keepRaw = self.getParameterValue(self.KEEP_RAW)
@@ -197,8 +183,8 @@ class ShortestPathFromLayer(TDGAlgorithm):
             rawFields = QgsFields()
             rawFields.append(QgsField('path_id', QVariant.Int))
             rawFields.append(QgsField('sequence', QVariant.Int))
-            rawFields.append(QgsField('from_vert', QVariant.Int))
-            rawFields.append(QgsField('to_vert', QVariant.Int))
+            rawFields.append(QgsField('from_road_id', QVariant.Int))
+            rawFields.append(QgsField('to_road_id', QVariant.Int))
             rawFields.append(QgsField('int_id', QVariant.Int))
             rawFields.append(QgsField('int_cost', QVariant.Int))
             rawFields.append(QgsField('road_id', QVariant.Int))
@@ -209,8 +195,8 @@ class ShortestPathFromLayer(TDGAlgorithm):
         if keepRoutes:
             routeFields = QgsFields()
             routeFields.append(QgsField('path_id', QVariant.Int))
-            routeFields.append(QgsField('from_vert', QVariant.Int))
-            routeFields.append(QgsField('to_vert', QVariant.Int))
+            routeFields.append(QgsField('from_road_id', QVariant.Int))
+            routeFields.append(QgsField('to_road_id', QVariant.Int))
             routeFields.append(QgsField('cmtve_cost', QVariant.Int))
             routeWriter = self.getOutputFromName(self.ROUTES_LAYER).getVectorWriter(
                 routeFields, QGis.WKBLineString, roadsLayer.crs())
@@ -238,81 +224,92 @@ class ShortestPathFromLayer(TDGAlgorithm):
             DG = nu.getStressNetwork(stress)
         progress.setPercentage(10)
 
-        # Get vertex IDs from input layer
-        progress.setInfo('Getting vertex IDs')
-        vertIds = []
-        for val in vector.values(destsLayer,vertIdField)[vertIdField]:
+        '''# Build spatial index of road features
+        progress.setInfo('Indexing road features')
+        index = vector.spatialindex(roadsLayer)
+
+        # Get nearest Road ID for input layer
+        progress.setInfo('Getting road IDs')
+        destinations = {}
+        for feat in vector.features(destsLayer):
+            roadMatch = QgsFeatureId()
+            destGeom = QgsGeometry(feat.geometry())
+            roadMatch = index.nearestNeighbor(destGeom.asPoint(),1)[0]
+            roadFeat = roadsLayer.getFeatures(QgsFeatureRequest().setFilterFid(roadMatch))[0]
+            roadGeom = QgsGeometry(roadFeat.geometry())
+            destinations[feat.id()] = {
+                'roadId': roadMatch,
+                'distance': 0
+            }'''
+        # Assume nearest Road ID and distance fields exist as road_id and road_dist
+
+        roadIds = list()
+        for val in vector.values(destsLayer,'road_id')['road_id']:
             if val.is_integer():
-                vertIds.append(int(val))
+                roadIds.append(int(val))
             else:
                 raise GeoAlgorithmExecutionException(
-                    self.tr('Bad vert_id values. Input field was %s. Check that \
-                        these are integer values.' % vertIdField))
+                    self.tr('Bad road_id values. Input field was %s. Check that \
+                        these are integer values.' % 'road_id'))
 
         # count pairs
-        vertPairCount = len(vertIds) ** 2 - len(vertIds)
-        progress.setInfo('%i total destination pairs identified' % vertPairCount)
-
-        # set up dictionary of road_ids with their geoms
-        roads = dict()
-        for feat in vector.features(roadsLayer):
-            g = QgsGeometry(feat.geometry())
-            f = QgsFeature(sumFields)
-            f.setGeometry(g)
-            f.setAttribute(0,feat['road_id'])
-            roads[feat['road_id']] = {'geom': g, 'count': 0, 'feat': f}
+        roadPairCount = len(roadIds) ** 2 - len(roadIds)
+        progress.setInfo('%i total destination pairs identified' % roadPairCount)
 
         # loop through each destination and get shortest routes to all others
         try:
             rowCount = 0
             pairCount = 0
-            for fromVert in vertIds:
-                for toVert in vertIds:
-                    if not fromVert == toVert:
+            for fromRoad in roadIds:
+                for toRoad in roadIds:
+                    if not fromRoad == toRoad:
                         # set counts
                         pairCount += 1
                         seq = 0
                         cost = 0
                         if pairCount % 1000 == 0:
                             progress.setInfo('Shortest path for pair %i of %i'
-                                    % (pairCount, vertPairCount))
+                                    % (pairCount, RoadPairCount))
 
                         # set feature for route output
                         routeFeat = None
                         if keepRoutes:
                             routeFeat = QgsFeature(routeFields)
                             routeFeat.setAttribute(0,pairCount) #path_id
-                            routeFeat.setAttribute(1,fromVert) #from_vert
-                            routeFeat.setAttribute(2,toVert) #to_vert
+                            routeFeat.setAttribute(1,fromRoad) #from_road_id
+                            routeFeat.setAttribute(2,toRoad) #to_road_id
+
+
+
+
+
+
+
+
+
+
+
 
                         # check the path and iterate through it
-                        if nx.has_path(DG,source=fromVert,target=toVert):
-                            shortestPath = nx.shortest_path(DG,
-                                                            source=fromVert,
-                                                            target=toVert,
-                                                            weight='weight')
-                            for i, v1 in enumerate(shortestPath):
-                                # if i == 0:
-                                #     continue    #leave out because this is the start vertex
-                                if i == len(shortestPath) - 1:
-                                    continue    #Leave out because this is the last vertex
+                        if nx.has_path(DG,source=fromRoad,target=toRoad):
+                            shortestPath = nx.shortest_path(
+                                DG,
+                                source=fromRoad,
+                                target=toRoad,
+                                weight='weight'
+                            )
+                            for i, v1 in enumerate(shortestPath, start=1):
+                                if i == len(shortestPath):
+                                    continue    #Leave out because this is the last Roadex
 
                                 rowCount += 1
-                                v2 = shortestPath[i+1]
-                                roadId = DG.edge[v1][v2]['road_id']
-                                if not roadId:
-                                    continue       #skip if this isn't a road link
+                                v2 = shortestPath[i]
                                 seq += 1
                                 roads[roadId]['count'] += 1
-                                v3 = None
-                                if i < len(shortestPath) - 2:
-                                    v3 = shortestPath[i+2]
 
                                 # set costs
                                 linkCost = DG.edge[v1][v2]['weight']
                                 intCost = 0
-                                if v3 and not DG.edge[v2][v3]['road_id']:
-                                    intCost = DG.edge[v2][v3]['weight']
                                 cost += linkCost
                                 cost += intCost
 
@@ -323,8 +320,8 @@ class ShortestPathFromLayer(TDGAlgorithm):
                                         rawFeat = QgsFeature(rawFields)
                                         rawFeat.setAttribute(0,pairCount) #path_id
                                         rawFeat.setAttribute(1,seq) #sequence
-                                        rawFeat.setAttribute(2,fromVert) #from_vert
-                                        rawFeat.setAttribute(3,toVert) #to_vert
+                                        rawFeat.setAttribute(2,fromRoad) #from_road_id
+                                        rawFeat.setAttribute(3,toRoad) #to_road_id
                                         rawFeat.setAttribute(4,DG.node[v2]['int_id']) #int_id
                                         rawFeat.setAttribute(5,intCost) #int_cost
                                         rawFeat.setAttribute(6,roadId) #road_id
@@ -348,7 +345,7 @@ class ShortestPathFromLayer(TDGAlgorithm):
                                         sumFeat.setAttribute(1,useCount) #use_count
 
                         del routeFeat
-                        progress.setPercentage(10 + 90*pairCount/vertPairCount)
+                        progress.setPercentage(10 + 90*pairCount/RoadPairCount)
 
             for roadId, r in roads.iteritems():
                 if r.get('count') > 0:
@@ -357,6 +354,24 @@ class ShortestPathFromLayer(TDGAlgorithm):
 
         except Exception, e:
             raise GeoAlgorithmExecutionException('Uncaught error: %s' % e)
+
+
+
+
+
+
+
+
+        # set up dictionary of road_ids with their geoms
+        roads = dict()
+        for feat in vector.features(roadsLayer):
+            g = QgsGeometry(feat.geometry())
+            f = QgsFeature(sumFields)
+            f.setGeometry(g)
+            f.setAttribute(0,feat['road_id'])
+            roads[feat['road_id']] = {'geom': g, 'count': 0, 'feat': f}
+
+
 
         if keepRaw:
             del rawWriter
