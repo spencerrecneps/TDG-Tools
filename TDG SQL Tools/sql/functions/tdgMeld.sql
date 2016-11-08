@@ -6,9 +6,9 @@ CREATE OR REPLACE FUNCTION tdg.tdgMeld(
     source_column_ TEXT,
     source_geom_ TEXT,
     tolerance_ FLOAT,
-    buffer_search_ DEFAULT 't',
-    azimuth_search DEFAULT 't',
-    midpoint_search DEFAULT 't',
+    buffer_search_ BOOLEAN DEFAULT 't',
+    azimuth_search BOOLEAN DEFAULT 't',
+    midpoint_search BOOLEAN DEFAULT 't',
     only_nulls_ BOOLEAN DEFAULT 't',
     min_target_length_ FLOAT DEFAULT NULL,
     min_shared_length_pct_ FLOAT DEFAULT 0.9
@@ -143,4 +143,4 @@ BEGIN
     RETURN 't';
 END $func$ LANGUAGE plpgsql;
 ALTER FUNCTION tdg.tdgMeld(REGCLASS,TEXT,TEXT,REGCLASS,TEXT,TEXT,FLOAT,
-    BOOLEAN,FLOAT,FLOAT,BOOLEAN,BOOLEAN) OWNER TO gis;
+    BOOLEAN,BOOLEAN,BOOLEAN,BOOLEAN,FLOAT,FLOAT) OWNER TO gis;
