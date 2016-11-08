@@ -11,7 +11,7 @@ CREATE OR REPLACE FUNCTION tdg.tdgMeld(
     midpoint_search DEFAULT 't',
     only_nulls_ BOOLEAN DEFAULT 't',
     min_target_length_ FLOAT DEFAULT NULL,
-    min_shared_length_pct_ FLOAT DEFAULT 0.9,
+    min_shared_length_pct_ FLOAT DEFAULT 0.9
 )
 RETURNS BOOLEAN AS $func$
 
