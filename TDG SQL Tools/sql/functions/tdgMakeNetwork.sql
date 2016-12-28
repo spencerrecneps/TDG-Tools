@@ -352,7 +352,7 @@ BEGIN
         --target_road_dir
         EXECUTE '
             UPDATE '||link_table||'
-            SET     target_road_dir = CASE WHEN '||link_table||'.int_id = road.intersection_to THEN $1
+            SET     target_road_dir = CASE WHEN '||link_table||'.int_id = road.intersection_from THEN $1
                                     ELSE $2
                                     END
             FROM    '||road_table_||' road
